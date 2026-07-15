@@ -175,10 +175,16 @@ public class MultiAgentOrchestrator {
 
                     String summary = callBedrockForAnalysis(summaryPrompt);
 
+                    // Generate suggested actions deterministically for "why" questions
+                    List<Map<String, String>> suggestedActions = new ArrayList<>();
+                    if (isWhyQuestion) {
+                        suggestedActions = generateSuggestedActions(question, summary, columns, rows);
+                    }
+
                     onEvent.accept(new AgentEvent("reasoning", "analyzer", "completed",
                             "Analysis complete", summary));
 
-                    String dataResult = buildDirectDataResponse(tableData, summary);
+                    String dataResult = buildDirectDataResponse(tableData, summary, suggestedActions);
                     onEvent.accept(new AgentEvent("complete", "orchestrator", "completed", "Data retrieved", dataResult));
                     return dataResult;
 
@@ -278,12 +284,86 @@ public class MultiAgentOrchestrator {
         }
     }
 
-    private String buildDirectDataResponse(Map<String, Object> tableData, String summary) {
+    private List<Map<String, String>> generateSuggestedActions(String question, String summary, List<String> columns, List<Map<String, Object>> rows) {
+        List<Map<String, String>> actions = new ArrayList<>();
+        String qLower = question.toLowerCase();
+        String sLower = summary.toLowerCase();
+
+        // Extract user name from results if present
+        String userName = "";
+        if (!rows.isEmpty()) {
+            Map<String, Object> firstRow = rows.get(0);
+            for (String col : columns) {
+                String colUpper = col.toUpperCase();
+                if (colUpper.contains("FIRST_NAME") || colUpper.contains("FIRST NAME")) {
+                    Object val = firstRow.get(col);
+                    if (val != null) userName = val.toString();
+                    break;
+                }
+            }
+        }
+
+        // Stuck contacts / high active time pattern
+        if (sLower.contains("stuck") || sLower.contains("not closed") || sLower.contains("left open") ||
+                sLower.contains("active time") && sLower.contains("high")) {
+            if (!userName.isEmpty()) {
+                actions.add(Map.of("label", "Fetch all stuck contacts", "query", "Show all stuck contacts for " + userName + " that are still open"));
+            }
+            actions.add(Map.of("label", "View recommended actions", "query", "How can I fix stuck contacts and what actions should I take"));
+        }
+
+        // High AHT pattern
+        if (qLower.contains("aht") || qLower.contains("handle time") || sLower.contains("handle time")) {
+            if (!userName.isEmpty()) {
+                actions.add(Map.of("label", "Check contact details", "query", "Show recent contacts for " + userName + " with duration breakdown"));
+                actions.add(Map.of("label", "Compare with team", "query", "Show average AHT for all agents and compare with " + userName));
+            }
+        }
+
+        // High hold time pattern
+        if (sLower.contains("hold time") || sLower.contains("hold") && sLower.contains("high")) {
+            if (!userName.isEmpty()) {
+                actions.add(Map.of("label", "Show high hold contacts", "query", "Show contacts with highest hold time for " + userName));
+            }
+        }
+
+        // Unavailable / break pattern
+        if (qLower.contains("unavailable") || qLower.contains("break") || sLower.contains("unavailable")) {
+            if (!userName.isEmpty()) {
+                actions.add(Map.of("label", "Show break details", "query", "Show all unavailable sessions for " + userName + " with state names and durations"));
+            }
+            actions.add(Map.of("label", "Compare break patterns", "query", "Which agents have the most unavailable time in the last 7 days"));
+        }
+
+        // Email specific pattern
+        if (sLower.contains("email") && (sLower.contains("open") || sLower.contains("left") || sLower.contains("high"))) {
+            if (!userName.isEmpty()) {
+                actions.add(Map.of("label", "Show open emails", "query", "Show all email contacts still open for " + userName));
+            }
+        }
+
+        // Always add a general drill-down if we have a user
+        if (!userName.isEmpty() && actions.size() < 4) {
+            actions.add(Map.of("label", "Show agent session history", "query", "Show recent session timeline for " + userName));
+        }
+
+        // Cap at 4 actions
+        if (actions.size() > 4) {
+            actions = new ArrayList<>(actions.subList(0, 4));
+        }
+
+        return actions;
+    }
+
+    private String buildDirectDataResponse(Map<String, Object> tableData, String summary, List<Map<String, String>> suggestedActions) {
         try {
             Map<String, Object> response = new LinkedHashMap<>();
             response.put("type", "data_result");
             response.put("summary", summary);
             response.put("tables", List.of(tableData));
+            if (suggestedActions != null && !suggestedActions.isEmpty()) {
+                response.put("suggestedActions", suggestedActions);
+            }
             return mapper.writeValueAsString(response);
         } catch (JsonProcessingException e) {
             return "{\"type\":\"data_result\",\"summary\":\"\",\"tables\":[]}";

@@ -305,6 +305,42 @@
     letter-spacing: 0.5px;
   }
 
+  /* Suggested Actions */
+  .suggested-actions {
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+  }
+  .suggested-actions-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 10px;
+  }
+  .action-btn {
+    display: inline-block;
+    margin: 4px 6px 4px 0;
+    padding: 8px 16px;
+    background: rgba(47,111,235,0.12);
+    border: 1px solid rgba(47,111,235,0.4);
+    border-radius: 20px;
+    color: #7bb0ff;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, transform 0.1s;
+  }
+  .action-btn:hover {
+    background: rgba(47,111,235,0.25);
+    border-color: var(--accent-blue);
+    transform: translateY(-1px);
+  }
+  .action-btn:active {
+    transform: translateY(0);
+  }
+
   /* Chart container */
   .chart-container {
     background: var(--bg-card);
@@ -497,6 +533,11 @@ let conversationHistory = [];
 function chatFill(t) {
   document.getElementById('chatInput').value = t;
   document.getElementById('chatInput').focus();
+}
+
+function chatFillAndAsk(t) {
+  document.getElementById('chatInput').value = t;
+  chatAsk();
 }
 
 function scrollToBottom() {
@@ -732,6 +773,18 @@ function buildDataResultHtml(parsed) {
       html += '<div style="font-size:14px;color:var(--text-primary);line-height:1.8;white-space:pre-wrap;">' + esc(text) + '</div>';
       html += '</div>';
     }
+  }
+
+  // Suggested Actions — MCQ-style clickable next steps
+  const actions = parsed.suggestedActions || [];
+  if (actions.length > 0) {
+    html += '<div class="suggested-actions">';
+    html += '<div class="suggested-actions-title">Recommended Next Steps</div>';
+    for (const action of actions) {
+      const query = action.query || action.label;
+      html += '<button class="action-btn" onclick="chatFillAndAsk(\'' + esc(query).replace(/'/g, "\\'") + '\')">' + esc(action.label) + '</button>';
+    }
+    html += '</div>';
   }
 
   return html;
