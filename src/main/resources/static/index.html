@@ -1,0 +1,997 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agentic Decision Intelligence</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg-primary: #0f1720;
+    --bg-card: #16213a;
+    --bg-input: #1a2536;
+    --border: #23324a;
+    --text-primary: #e6edf3;
+    --text-muted: rgba(230,237,243,0.6);
+    --accent-blue: #2f6feb;
+    --accent-green: #7bd88f;
+    --badge-at-risk: #e05252;
+    --badge-warning: #e0a040;
+    --badge-healthy: #7bd88f;
+  }
+
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, 'Segoe UI', Roboto, sans-serif; margin: 0; background: var(--bg-primary); color: var(--text-primary); }
+
+  /* Header */
+  header { padding: 16px 24px; background: #111c2e; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+  header h1 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: 0.3px; }
+  header .sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+  /* Tab bar */
+  nav { display: flex; gap: 4px; }
+  nav button {
+    padding: 8px 18px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    color: var(--text-muted);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+  }
+  nav button:hover { background: rgba(47,111,235,0.12); color: var(--text-primary); }
+  nav button.active { background: rgba(47,111,235,0.2); border-color: var(--accent-blue); color: var(--text-primary); }
+
+  /* Main / panels */
+  main { max-width: 1000px; margin: 0 auto; padding: 28px 24px; }
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  /* ===================== CHAT PANEL ===================== */
+  .prompt-row { display: flex; gap: 8px; margin-bottom: 12px; }
+  input[type=text] { flex: 1; padding: 12px 14px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); font-size: 14px; outline: none; transition: border-color 0.15s; }
+  input[type=text]:focus { border-color: var(--accent-blue); }
+  .ask-btn {
+    padding: 12px 20px;
+    background: var(--accent-blue);
+    border: 0;
+    border-radius: 8px;
+    color: white;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+    transition: opacity 0.15s;
+  }
+  .ask-btn:disabled { opacity: 0.6; cursor: wait; }
+
+  .examples { font-size: 12px; color: var(--text-muted); margin-bottom: 18px; line-height: 1.8; }
+  .examples a { color: #7bb0ff; cursor: pointer; margin-right: 10px; text-decoration: none; }
+  .examples a:hover { text-decoration: underline; }
+
+  /* Investigation log */
+  .investigation-log {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 14px;
+    font-size: 13px;
+    font-family: 'SFMono-Regular', Consolas, monospace;
+    max-height: 180px;
+    overflow-y: auto;
+  }
+  .log-entry { padding: 2px 0; color: var(--text-muted); }
+  .log-entry.highlight { color: var(--text-primary); }
+
+  /* Multi-agent flow visualization */
+  .agent-flow {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 14px;
+  }
+  .flow-phase {
+    margin-bottom: 16px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .flow-phase:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+  .phase-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+    font-weight: 600;
+    font-size: 14px;
+  }
+  .phase-icon {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+  }
+  .phase-icon.active {
+    background: var(--accent-blue);
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+  .phase-icon.completed { background: var(--accent-green); }
+  .phase-icon.pending { background: #253c66; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+  .agent-card {
+    background: #1a2942;
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin: 6px 0;
+    font-size: 13px;
+  }
+  .agent-card-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+  }
+  .agent-name { font-weight: 600; color: var(--accent-blue); }
+  .agent-status { font-size: 12px; color: var(--text-muted); }
+  .agent-detail { color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+  .hypothesis-card {
+    background: #1a2942;
+    border-left: 3px solid var(--accent-green);
+    border-radius: 4px;
+    padding: 10px 12px;
+    margin: 6px 0;
+  }
+  .hypothesis-title { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+  .confidence-bar {
+    height: 4px;
+    background: #253c66;
+    border-radius: 2px;
+    overflow: hidden;
+    margin: 4px 0;
+  }
+  .confidence-fill {
+    height: 100%;
+    background: var(--accent-green);
+    transition: width 0.4s;
+  }
+
+  /* Result card */
+  .result-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; margin-bottom: 12px; }
+  .summary { font-size: 15px; line-height: 1.6; margin-bottom: 14px; }
+  .cause-card { border-left: 3px solid var(--accent-blue); padding: 10px 14px; margin-bottom: 10px; background: #1a2942; border-radius: 4px; }
+  .cause-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .cause-title { font-weight: 600; font-size: 14px; }
+  .conf-badge { font-size: 12px; padding: 2px 10px; border-radius: 12px; background: #253c66; }
+  .conf-high { background: #1a4a2a; color: #7bd88f; }
+  .conf-medium { background: #3a3a1a; color: #e0d040; }
+  .conf-low { background: #3a1a1a; color: #e05252; }
+  .evidence-list { font-size: 13px; color: var(--text-muted); margin: 4px 0 6px; padding-left: 20px; line-height: 1.7; }
+  .recommended-action { font-size: 13px; color: var(--accent-green); margin-top: 6px; }
+
+  .error-card { background: #2a1a1a; border: 1px solid #e05252; border-radius: 8px; padding: 12px 16px; color: #e05252; margin-bottom: 12px; }
+
+  .spinner {
+    display: inline-block;
+    width: 14px; height: 14px;
+    border: 2px solid white;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    vertical-align: middle;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ===================== RISK PANEL ===================== */
+  .risk-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+  .risk-header h2 { margin: 0; font-size: 18px; font-weight: 600; }
+  .last-updated { font-size: 12px; color: var(--text-muted); }
+  .refresh-btn {
+    padding: 7px 14px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-muted);
+    font-size: 13px;
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+  }
+  .refresh-btn:hover { border-color: var(--accent-blue); color: var(--text-primary); }
+
+  .risk-table { width: 100%; border-collapse: collapse; background: var(--bg-card); border-radius: 10px; overflow: hidden; }
+  .risk-table th { background: #111c2e; padding: 12px 16px; text-align: left; font-size: 13px; color: var(--text-muted); border-bottom: 1px solid var(--border); font-weight: 500; }
+  .risk-table td { padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 14px; }
+  .risk-table tbody tr:last-child td { border-bottom: none; }
+  .row-at-risk td { background: rgba(224,82,82,0.05); }
+  .row-warning td { background: rgba(224,160,64,0.05); }
+
+  .risk-badge { padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; }
+  .badge-at-risk { background: rgba(224,82,82,0.2); color: var(--badge-at-risk); }
+  .badge-warning { background: rgba(224,160,64,0.2); color: var(--badge-warning); }
+  .badge-healthy { background: rgba(123,216,143,0.2); color: var(--badge-healthy); }
+
+  .skill-name { font-weight: 500; }
+  .rec-text { font-size: 13px; }
+  .text-muted { color: var(--text-muted); font-size: 13px; }
+
+  .loading-row td { color: var(--text-muted); text-align: center; padding: 40px; }
+  .empty-state { text-align: center; padding: 40px; color: var(--text-muted); font-size: 14px; }
+
+  /* SLA bar */
+  .sla-cell { min-width: 110px; }
+  .sla-bar-wrap { display: flex; align-items: center; gap: 8px; }
+  .sla-bar-bg { flex: 1; height: 6px; background: #1a2536; border-radius: 3px; overflow: hidden; }
+  .sla-bar-fill { height: 100%; border-radius: 3px; transition: width 0.4s; }
+  .sla-pct { font-size: 13px; white-space: nowrap; min-width: 38px; }
+
+  /* ===================== AGENT PANEL ===================== */
+  .agent-view { }
+  .agent-view h2 { margin: 0 0 8px; font-size: 18px; font-weight: 600; }
+  .agent-info { color: var(--text-muted); font-size: 13px; margin-bottom: 24px; }
+  .placeholder-content {
+    background: var(--bg-card);
+    border: 1px dashed var(--border);
+    border-radius: 10px;
+    padding: 48px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 14px;
+    line-height: 1.7;
+  }
+  .placeholder-content p { margin: 4px 0; }
+
+  /* Nudge overlay */
+  .nudge-overlay {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    width: 340px;
+    background: var(--bg-card);
+    border: 1px solid var(--accent-blue);
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.45);
+    z-index: 1000;
+    display: none;
+    animation: slideIn 0.3s ease-out;
+  }
+  .nudge-overlay.visible { display: block; }
+  @keyframes slideIn { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+  .nudge-header { display: flex; align-items: center; gap: 8px; padding: 12px 16px 10px; border-bottom: 1px solid var(--border); }
+  .nudge-icon { font-size: 18px; }
+  .nudge-title { font-weight: 600; flex: 1; font-size: 14px; }
+  .dismiss-btn { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 16px; padding: 2px 6px; border-radius: 4px; line-height: 1; }
+  .dismiss-btn:hover { background: rgba(255,255,255,0.1); color: var(--text-primary); }
+  .nudge-body { padding: 12px 16px 14px; }
+  .nudge-message { font-size: 14px; line-height: 1.55; margin: 0 0 10px; }
+  .nudge-meta { display: flex; justify-content: space-between; align-items: center; font-size: 12px; }
+  .metric-tag { background: rgba(47,111,235,0.2); color: var(--accent-blue); padding: 2px 10px; border-radius: 12px; }
+  .nudge-timestamp { color: var(--text-muted); }
+
+  /* KPI Widgets */
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .kpi-card {
+    background: #1a2942;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    text-align: center;
+  }
+  .kpi-value {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--accent-blue);
+    margin-bottom: 4px;
+  }
+  .kpi-value.alert { color: var(--badge-at-risk); }
+  .kpi-value.warn { color: var(--badge-warning); }
+  .kpi-value.good { color: var(--accent-green); }
+  .kpi-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  /* Chart container */
+  .chart-container {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 16px;
+    position: relative;
+    height: 250px;
+  }
+
+  /* Chat messages */
+  .chat-msg { margin-bottom: 16px; display: flex; flex-direction: column; }
+  .chat-msg.user { align-items: flex-end; }
+  .chat-msg.bot { align-items: flex-start; }
+  .chat-bubble-user {
+    background: var(--accent-blue);
+    color: white;
+    padding: 10px 16px;
+    border-radius: 16px 16px 4px 16px;
+    font-size: 14px;
+    max-width: 75%;
+    word-wrap: break-word;
+  }
+  .chat-bubble-bot {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 4px 16px 16px 16px;
+    padding: 16px 18px;
+    max-width: 95%;
+    width: 100%;
+  }
+  .chat-loading-indicator {
+    display: flex; align-items: center; gap: 8px;
+    padding: 12px 16px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 4px 16px 16px 16px;
+    font-size: 13px; color: var(--text-muted);
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Agentic Decision Intelligence</h1>
+    <div class="sub">Claude on Bedrock · agent loop · mock Valkey + OpenSearch</div>
+  </div>
+  <nav>
+    <button class="active" onclick="switchTab('chat', this)">RCA Chat</button>
+    <button onclick="switchTab('risk', this)">Risk Monitor</button>
+    <button onclick="switchTab('agent', this)">Agent View</button>
+  </nav>
+</header>
+
+<main>
+
+  <!-- ============ CHAT PANEL ============ -->
+  <section id="panel-chat" class="panel active">
+    <div class="examples">
+      Try:
+      <a onclick="chatFill('Why is PerfUser_0011 unavailable for long time?')">Why is PerfUser_0011 unavailable?</a>
+      <a onclick="chatFill('Show agent sessions with names')">Show agent sessions</a>
+      <a onclick="chatFill('Which agents are taking more breaks?')">Agents taking breaks</a>
+    </div>
+
+    <div id="chatHistory" style="max-height:calc(100vh - 200px);overflow-y:auto;padding-bottom:16px;"></div>
+
+    <div id="chatLoading" style="display:none;padding:12px 16px;">
+      <div class="agent-card">
+        <span class="spinner"></span> <span id="chatLoadingText" style="margin-left:8px;color:var(--text-muted);">Investigating...</span>
+      </div>
+    </div>
+
+    <div class="prompt-row" style="position:sticky;bottom:0;background:var(--bg-primary);padding-top:12px;">
+      <input id="chatInput" type="text" placeholder="Ask about agents, metrics, or investigate issues..." />
+      <button class="ask-btn" id="askBtn" onclick="chatAsk()">Ask</button>
+    </div>
+  </section>
+
+  <!-- ============ RISK PANEL ============ -->
+  <section id="panel-risk" class="panel">
+    <div class="risk-header">
+      <h2>Skill Risk Monitor</h2>
+      <div style="display:flex;align-items:center;gap:12px;">
+        <span class="last-updated" id="riskLastUpdated"></span>
+        <button class="refresh-btn" onclick="riskLoad()">Refresh</button>
+      </div>
+    </div>
+    <table class="risk-table">
+      <thead>
+        <tr>
+          <th>Skill</th>
+          <th>Risk</th>
+          <th class="sla-cell">SLA Now</th>
+          <th class="sla-cell">SLA Forecast</th>
+          <th>Queue Depth</th>
+          <th>Top Recommendation</th>
+        </tr>
+      </thead>
+      <tbody id="riskTableBody">
+        <tr class="loading-row"><td colspan="6">Loading risk data&hellip;</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ============ AGENT PANEL ============ -->
+  <section id="panel-agent" class="panel">
+    <div class="agent-view">
+      <h2>Agent Console</h2>
+      <p class="agent-info">Agent: AG-042 &nbsp;|&nbsp; Skill: Banking &nbsp;|&nbsp; Shift: 11:00–19:00</p>
+      <div class="placeholder-content">
+        <p>Agent performance dashboard would appear here.</p>
+        <p>Nudge overlay appears in the bottom-right corner when coaching is triggered.</p>
+        <p style="margin-top:16px;font-size:12px;color:rgba(230,237,243,0.35);">Listening for coaching nudges on /coach/nudges/stream&hellip;</p>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- Nudge overlay (global, visible on any tab) -->
+<div class="nudge-overlay" id="nudgeOverlay">
+  <div class="nudge-header">
+    <span class="nudge-icon">💡</span>
+    <span class="nudge-title">Coaching Nudge</span>
+    <button class="dismiss-btn" onclick="nudgeDismiss()" title="Dismiss">✕</button>
+  </div>
+  <div class="nudge-body">
+    <p class="nudge-message" id="nudgeMessage"></p>
+    <div class="nudge-meta">
+      <span class="metric-tag" id="nudgeMetric" style="display:none;"></span>
+      <span class="nudge-timestamp" id="nudgeTimestamp"></span>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   TAB SWITCHING
+   ============================================================ */
+function switchTab(name, btn) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+  document.getElementById('panel-' + name).classList.add('active');
+  btn.classList.add('active');
+}
+
+/* ============================================================
+   UTILITIES
+   ============================================================ */
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
+  );
+}
+
+function pct(val) {
+  return Math.round((val || 0) * 100) + '%';
+}
+
+function confClass(conf) {
+  if (conf >= 75) return 'conf-high';
+  if (conf >= 50) return 'conf-medium';
+  return 'conf-low';
+}
+
+function slaColor(val) {
+  if (val >= 0.9) return '#7bd88f';
+  if (val >= 0.75) return '#e0a040';
+  return '#e05252';
+}
+
+function slaBar(val) {
+  const color = slaColor(val);
+  const w = Math.min(100, Math.max(0, Math.round(val * 100)));
+  return `<div class="sla-bar-wrap">
+    <div class="sla-bar-bg"><div class="sla-bar-fill" style="width:${w}%;background:${color};"></div></div>
+    <span class="sla-pct" style="color:${color};">${pct(val)}</span>
+  </div>`;
+}
+
+/* ============================================================
+   CHAT — Conversation-style (appending messages)
+   ============================================================ */
+let chatEventSource = null;
+let conversationHistory = [];
+
+function chatFill(t) {
+  document.getElementById('chatInput').value = t;
+  document.getElementById('chatInput').focus();
+}
+
+function scrollToBottom() {
+  const hist = document.getElementById('chatHistory');
+  hist.scrollTop = hist.scrollHeight;
+}
+
+function appendUserMessage(q) {
+  const hist = document.getElementById('chatHistory');
+  const div = document.createElement('div');
+  div.className = 'chat-msg user';
+  div.innerHTML = '<div class="chat-bubble-user">' + esc(q) + '</div>';
+  hist.appendChild(div);
+  scrollToBottom();
+}
+
+function showLoading(text) {
+  const el = document.getElementById('chatLoading');
+  document.getElementById('chatLoadingText').textContent = text || 'Investigating...';
+  el.style.display = 'block';
+  scrollToBottom();
+}
+
+function hideLoading() {
+  document.getElementById('chatLoading').style.display = 'none';
+}
+
+function appendBotMessage(contentHtml) {
+  hideLoading();
+  const hist = document.getElementById('chatHistory');
+  const div = document.createElement('div');
+  div.className = 'chat-msg bot';
+  div.innerHTML = '<div class="chat-bubble-bot">' + contentHtml + '</div>';
+  hist.appendChild(div);
+  scrollToBottom();
+}
+
+function buildContextualQuery(q) {
+  if (conversationHistory.length === 0) return q;
+  // Include last 2 exchanges as context so LLM understands follow-ups
+  const recentHistory = conversationHistory.slice(-4);
+  let context = '';
+  for (const msg of recentHistory) {
+    if (msg.role === 'user') {
+      context += 'User previously asked: "' + msg.content + '"\n';
+    } else {
+      // Extract just the summary from assistant response, not full table data
+      try {
+        const parsed = JSON.parse(msg.content);
+        if (parsed.summary) {
+          const summary = typeof parsed.summary === 'string' ? parsed.summary.substring(0, 300) : '';
+          context += 'System answered: ' + summary + '\n';
+        }
+      } catch {
+        context += 'System answered: ' + msg.content.substring(0, 200) + '\n';
+      }
+    }
+  }
+  return '[CONVERSATION CONTEXT]\n' + context + '\n[CURRENT QUESTION]\n' + q + '\n\nIMPORTANT: Use the conversation context to understand references like "above user", "this agent", "that data", etc. The current question may be a follow-up to previous questions.';
+}
+
+function chatAsk() {
+  const q = document.getElementById('chatInput').value.trim();
+  if (!q) return;
+
+  appendUserMessage(q);
+  conversationHistory.push({ role: 'user', content: q });
+  document.getElementById('chatInput').value = '';
+
+  const btn = document.getElementById('askBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Investigating&hellip;';
+  showLoading('Analyzing your question...');
+
+  if (chatEventSource) { chatEventSource.close(); chatEventSource = null; }
+  const contextualQ = buildContextualQuery(q);
+  chatAskStream(contextualQ, btn);
+}
+
+function chatAskStream(q, btn) {
+  const url = '/rca/v1/ask/stream?q=' + encodeURIComponent(q);
+  chatEventSource = new EventSource(url);
+
+  chatEventSource.addEventListener('planning', function(e) {
+    showLoading('Planning investigation...');
+  });
+  chatEventSource.addEventListener('investigating', function(e) {
+    try {
+      const d = JSON.parse(e.data);
+      showLoading(d.detail || 'Gathering evidence...');
+    } catch { showLoading('Gathering evidence...'); }
+  });
+  chatEventSource.addEventListener('reasoning', function(e) {
+    try {
+      const d = JSON.parse(e.data);
+      showLoading(d.detail || 'Analyzing results...');
+    } catch { showLoading('Analyzing results...'); }
+  });
+  chatEventSource.addEventListener('recommending', function(e) {
+    showLoading('Generating recommendations...');
+  });
+  chatEventSource.addEventListener('complete', function(e) {
+    // handled by 'final'
+  });
+
+  chatEventSource.addEventListener('final', function(e) {
+    try {
+      const d = JSON.parse(e.data);
+      let answerData;
+      if (d.answerJson != null) {
+        answerData = d.answerJson;
+      } else if (d.type) {
+        answerData = d;
+      } else {
+        answerData = d;
+      }
+      const html = buildAnswerHtml(answerData);
+      appendBotMessage(html);
+      conversationHistory.push({ role: 'assistant', content: typeof answerData === 'string' ? answerData : JSON.stringify(answerData) });
+    } catch {
+      appendBotMessage('<div style="color:var(--text-muted);">' + esc(e.data) + '</div>');
+    }
+    chatEventSource.close();
+    chatEventSource = null;
+    btn.disabled = false;
+    btn.textContent = 'Ask';
+  });
+
+  chatEventSource.onerror = function() {
+    if (chatEventSource && chatEventSource.readyState === EventSource.CLOSED) {
+      hideLoading();
+      appendBotMessage('<div style="color:#e05252;">Connection lost. Please try again.</div>');
+      chatEventSource = null;
+      btn.disabled = false;
+      btn.textContent = 'Ask';
+    }
+  };
+}
+
+function buildAnswerHtml(answerJson) {
+  let parsed;
+  if (typeof answerJson === 'object' && answerJson !== null) {
+    parsed = answerJson;
+  } else {
+    const stripped = String(answerJson || '').replace(/^\s*```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim();
+    try { parsed = JSON.parse(stripped); }
+    catch { return '<div style="font-size:14px;line-height:1.7;">' + esc(String(answerJson || '')) + '</div>'; }
+  }
+
+  if (parsed.type === 'data_result') return buildDataResultHtml(parsed);
+  if (parsed.type === 'rca_result') return buildRcaResultHtml(parsed);
+
+  // Legacy fallback
+  let html = '';
+  if (parsed.summary) html += '<div class="summary">' + esc(parsed.summary) + '</div>';
+  if (parsed.causes && parsed.causes.length) {
+    for (const c of parsed.causes) {
+      html += '<div class="cause-card"><div class="cause-header"><span class="cause-title">' + esc(c.title || '') + '</span></div>';
+      if (c.evidence && c.evidence.length) {
+        html += '<ul class="evidence-list">';
+        for (const ev of c.evidence) html += '<li>' + esc(ev) + '</li>';
+        html += '</ul>';
+      }
+      html += '</div>';
+    }
+  }
+  return html || '<div style="color:var(--text-muted);">No results.</div>';
+}
+
+let chartCounter = 0;
+
+function buildDataResultHtml(parsed) {
+  let html = '';
+
+  const tables = (parsed.tables || []).filter(t => (t.rows || []).length > 0);
+  if (tables.length > 0) {
+    for (const tableData of tables) {
+      const rows = tableData.rows || [];
+      const columns = tableData.columns || (rows.length > 0 ? Object.keys(rows[0]) : []);
+      const rowCount = tableData.rowCount || rows.length;
+      const displayCount = rows.length;
+      const countLabel = rowCount > displayCount
+          ? rowCount + ' total rows, showing ' + displayCount
+          : rowCount + ' rows';
+
+      // KPI Widgets — if 1 row with numeric values, show as cards
+      if (rows.length === 1) {
+        html += buildKpiWidgets(rows[0], columns);
+      }
+
+      // Chart — if multiple rows with a label + numeric columns, show bar chart
+      if (rows.length > 1 && rows.length <= 50) {
+        const chartHtml = buildChart(rows, columns);
+        if (chartHtml) html += chartHtml;
+      }
+
+      // Data table
+      html += '<div style="margin-bottom:16px;">';
+      html += '<div style="font-weight:600;font-size:13px;color:var(--accent-blue);margin-bottom:8px;">Query Result (' + countLabel + ')</div>';
+      html += '<div style="overflow-x:auto;max-height:350px;overflow-y:auto;">';
+      html += '<table style="width:100%;border-collapse:collapse;font-size:12px;">';
+      html += '<thead style="position:sticky;top:0;background:var(--bg-card);"><tr>';
+      for (const col of columns) html += '<th style="padding:8px 10px;text-align:left;border-bottom:2px solid var(--accent-blue);color:var(--text-muted);font-weight:600;white-space:nowrap;">' + esc(col) + '</th>';
+      html += '</tr></thead><tbody>';
+      for (const row of rows.slice(0, 100)) {
+        html += '<tr>';
+        for (const col of columns) {
+          let val = row[col];
+          if (val === null || val === undefined) val = '-';
+          html += '<td style="padding:6px 10px;border-bottom:1px solid var(--border);white-space:nowrap;">' + esc(String(val)) + '</td>';
+        }
+        html += '</tr>';
+      }
+      html += '</tbody></table></div>';
+      if (rows.length > 100) html += '<div style="font-size:12px;color:var(--text-muted);margin-top:4px;">Showing 100 of ' + rowCount + ' rows</div>';
+      html += '</div>';
+    }
+  } else {
+    html += '<div style="color:var(--text-muted);font-size:13px;padding:12px;">No data found for your query.</div>';
+  }
+
+  // Summary — render FULL text, no truncation
+  const summary = parsed.summary || '';
+  if (typeof summary === 'string' && summary.length > 0) {
+    let text = summary;
+    text = text.replace(/```json[\s\S]*?```/gi, '').trim();
+    text = text.replace(/```[\s\S]*?```/gi, '').trim();
+    text = text.replace(/\*\*/g, '');
+    text = text.replace(/^Supervisor Summary:\s*/i, '').trim();
+    if (text.length > 0) {
+      html += '<div style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px;">';
+      html += '<div style="font-weight:600;font-size:14px;margin-bottom:8px;color:var(--accent-green);">Analysis</div>';
+      html += '<div style="font-size:14px;color:var(--text-primary);line-height:1.8;white-space:pre-wrap;">' + esc(text) + '</div>';
+      html += '</div>';
+    }
+  }
+
+  return html;
+}
+
+function buildKpiWidgets(row, columns) {
+  const numericCols = columns.filter(c => {
+    const v = row[c];
+    return v !== null && v !== undefined && !isNaN(Number(v)) && String(v).trim() !== '';
+  });
+  const textCols = columns.filter(c => !numericCols.includes(c));
+
+  if (numericCols.length === 0) return '';
+
+  let html = '';
+  // Show text fields as a header
+  if (textCols.length > 0) {
+    const nameparts = textCols.map(c => row[c]).filter(Boolean).join(' ');
+    if (nameparts) {
+      html += '<div style="font-weight:600;font-size:15px;margin-bottom:10px;color:var(--text-primary);">' + esc(nameparts) + '</div>';
+    }
+  }
+
+  html += '<div class="kpi-grid">';
+  for (const col of numericCols) {
+    let val = Number(row[col]);
+    let displayVal = val;
+    let cssClass = '';
+
+    // Format large numbers
+    if (val >= 10000) {
+      displayVal = val.toLocaleString();
+    } else if (val % 1 !== 0) {
+      displayVal = val.toFixed(1);
+    }
+
+    // Color coding for durations that seem abnormally high
+    const colLower = col.toLowerCase();
+    if (colLower.includes('time') || colLower.includes('duration') || colLower.includes('second')) {
+      if (val > 3600) cssClass = 'alert';
+      else if (val > 600) cssClass = 'warn';
+      else cssClass = 'good';
+    }
+
+    html += '<div class="kpi-card">';
+    html += '<div class="kpi-value ' + cssClass + '">' + esc(String(displayVal)) + '</div>';
+    html += '<div class="kpi-label">' + esc(col) + '</div>';
+    html += '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function buildChart(rows, columns) {
+  // Find label column (first text column) and numeric columns
+  const labelCol = columns.find(c => {
+    const v = rows[0][c];
+    return v !== null && v !== undefined && isNaN(Number(v));
+  });
+  const numericCols = columns.filter(c => {
+    const v = rows[0][c];
+    return v !== null && v !== undefined && !isNaN(Number(v)) && Number(v) !== 0;
+  });
+
+  // Need at least a label and one numeric column for a chart
+  if (!labelCol || numericCols.length === 0) return '';
+  // Pick up to 3 numeric columns for the chart
+  const chartCols = numericCols.slice(0, 3);
+
+  const chartId = 'chart_' + (++chartCounter);
+  const labels = rows.slice(0, 20).map(r => String(r[labelCol] || '').substring(0, 20));
+  const colors = ['#2f6feb', '#7bd88f', '#e0a040', '#e05252'];
+
+  let html = '<div class="chart-container"><canvas id="' + chartId + '"></canvas></div>';
+
+  // Schedule chart rendering after DOM insertion
+  setTimeout(() => {
+    const ctx = document.getElementById(chartId);
+    if (!ctx) return;
+    const datasets = chartCols.map((col, i) => ({
+      label: col,
+      data: rows.slice(0, 20).map(r => Number(r[col]) || 0),
+      backgroundColor: colors[i % colors.length] + '99',
+      borderColor: colors[i % colors.length],
+      borderWidth: 1
+    }));
+
+    new Chart(ctx, {
+      type: rows.length <= 6 ? 'bar' : 'bar',
+      data: { labels, datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: '#e6edf3', font: { size: 11 } } }
+        },
+        scales: {
+          x: { ticks: { color: '#8b949e', font: { size: 10 }, maxRotation: 45 }, grid: { color: '#23324a' } },
+          y: { ticks: { color: '#8b949e' }, grid: { color: '#23324a' } }
+        }
+      }
+    });
+  }, 100);
+
+  return html;
+}
+
+function buildRcaResultHtml(parsed) {
+  let html = '';
+  const analysis = parsed.analysis || {};
+
+  if (analysis.summary) {
+    html += '<div class="summary">' + esc(analysis.summary) + '</div>';
+  }
+  if (analysis.recommendations && analysis.recommendations.length) {
+    html += '<div style="font-weight:600;margin-bottom:8px;">Recommendations</div>';
+    for (const rec of analysis.recommendations) {
+      const urgencyColor = rec.urgency === 'critical' || rec.urgency === 'high' ? '#e05252' : '#e0a040';
+      html += '<div class="cause-card" style="border-left-color:' + urgencyColor + ';">';
+      html += '<div class="cause-header"><span class="cause-title">' + esc(rec.action || '') + '</span>';
+      html += '<span class="conf-badge" style="background:rgba(224,82,82,0.2);color:' + urgencyColor + ';">' + esc(rec.urgency) + '</span></div>';
+      if (rec.rationale) html += '<div style="font-size:13px;color:var(--text-muted);margin:4px 0;">' + esc(rec.rationale) + '</div>';
+      if (rec.expectedImpact) html += '<div class="recommended-action">&rarr; ' + esc(rec.expectedImpact) + '</div>';
+      html += '</div>';
+    }
+  }
+
+  const evidence = parsed.evidence || {};
+  if (Object.keys(evidence).length > 0) {
+    html += '<div style="font-weight:600;margin:16px 0 8px;border-top:1px solid var(--border);padding-top:12px;">Supporting Evidence</div>';
+    for (const [agentName, agentData] of Object.entries(evidence)) {
+      let findings;
+      try { findings = typeof agentData === 'string' ? JSON.parse(agentData) : agentData; } catch { findings = null; }
+      if (findings && findings.findings) {
+        for (const f of findings.findings) {
+          html += '<div style="background:#1a2942;border-radius:4px;padding:8px 12px;margin:4px 0;font-size:12px;">';
+          html += '<span style="color:var(--accent-blue);font-weight:500;">' + esc(agentName) + '</span>: ';
+          html += esc(f.observation || f.metric || JSON.stringify(f));
+          html += '</div>';
+        }
+      }
+    }
+  }
+
+  return html;
+}
+
+document.getElementById('chatInput').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') chatAsk();
+});
+
+/* ============================================================
+   RISK PANEL — POLLING
+   ============================================================ */
+let riskPollTimer = null;
+
+function riskLoad() {
+  fetch('/risk/snapshot')
+    .then(r => {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    })
+    .then(data => {
+      riskRender(data.skills || []);
+      document.getElementById('riskLastUpdated').textContent = 'Last updated: ' + new Date().toLocaleTimeString();
+    })
+    .catch(err => {
+      const tbody = document.getElementById('riskTableBody');
+      tbody.innerHTML = '<tr class="loading-row"><td colspan="6" style="color:#e05252;">Failed to load: ' + esc(err.message) + '</td></tr>';
+    });
+}
+
+function riskRender(skills) {
+  const tbody = document.getElementById('riskTableBody');
+  if (!skills.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No skill data available.</td></tr>';
+    return;
+  }
+  let html = '';
+  for (const s of skills) {
+    const rowClass = 'row-' + (s.riskLevel || 'healthy');
+    const badgeClass = 'badge-' + (s.riskLevel || 'healthy');
+    let rec = '<span class="text-muted">Monitor</span>';
+    if (s.recommendation && s.recommendation.action === 'overflow') {
+      rec = '<span class="rec-text">Overflow ' + esc(s.recommendation.overflowPct) + '% to '
+          + esc(s.recommendation.overflowTo) + ' &rarr; ' + esc(s.recommendation.predictedSlaImpact) + '</span>';
+    }
+    html += '<tr class="' + rowClass + '">';
+    html += '<td class="skill-name">' + esc(s.skillName) + '</td>';
+    html += '<td><span class="risk-badge ' + badgeClass + '">' + esc(s.riskLevel || 'healthy') + '</span></td>';
+    html += '<td class="sla-cell">' + slaBar(s.currentSlaCompliance) + '</td>';
+    html += '<td class="sla-cell">' + slaBar(s.forecastedSlaCompliance) + '</td>';
+    html += '<td>' + esc(s.queueDepth) + '</td>';
+    html += '<td>' + rec + '</td>';
+    html += '</tr>';
+  }
+  tbody.innerHTML = html;
+}
+
+function riskStartPolling() {
+  riskLoad();
+  if (riskPollTimer) clearInterval(riskPollTimer);
+  riskPollTimer = setInterval(riskLoad, 10000);
+}
+
+/* Start polling when Risk tab is first opened */
+(function patchRiskTab() {
+  const riskBtn = document.querySelectorAll('nav button')[1];
+  const orig = riskBtn.getAttribute('onclick');
+  riskBtn.setAttribute('onclick', '');
+  riskBtn.addEventListener('click', function() {
+    switchTab('risk', riskBtn);
+    if (!riskPollTimer) riskStartPolling();
+  });
+})();
+
+/* ============================================================
+   AGENT NUDGE — SSE
+   ============================================================ */
+let nudgeEventSource = null;
+
+function nudgeConnect() {
+  if (nudgeEventSource) return;
+  nudgeEventSource = new EventSource('/coach/nudges/stream');
+  nudgeEventSource.onmessage = function(e) {
+    try {
+      const nudge = JSON.parse(e.data);
+      nudgeShow(nudge);
+    } catch {}
+  };
+  nudgeEventSource.onerror = function() {
+    nudgeEventSource.close();
+    nudgeEventSource = null;
+    setTimeout(nudgeConnect, 5000);
+  };
+}
+
+function nudgeShow(nudge) {
+  document.getElementById('nudgeMessage').textContent = nudge.message || '';
+  const metricEl = document.getElementById('nudgeMetric');
+  if (nudge.metric) {
+    metricEl.textContent = nudge.metric;
+    metricEl.style.display = 'inline';
+  } else {
+    metricEl.style.display = 'none';
+  }
+  document.getElementById('nudgeTimestamp').textContent = new Date().toLocaleTimeString();
+  const overlay = document.getElementById('nudgeOverlay');
+  overlay.classList.remove('visible');
+  // Force reflow for re-animation
+  void overlay.offsetWidth;
+  overlay.classList.add('visible');
+}
+
+function nudgeDismiss() {
+  document.getElementById('nudgeOverlay').classList.remove('visible');
+}
+
+// Start nudge stream immediately
+nudgeConnect();
+</script>
+</body>
+</html>

@@ -1,0 +1,55 @@
+{
+  "generatedAt": "2026-07-15T12:00:00Z",
+  "skills": [
+    {
+      "skillId": "SKL-001",
+      "skillName": "Banking",
+      "riskLevel": "at-risk",
+      "currentSlaCompliance": 0.82,
+      "forecastedSlaCompliance": 0.79,
+      "queueDepth": 23,
+      "agentsAvailable": 38,
+      "agentsRequired": 46,
+      "recommendation": {
+        "action": "overflow",
+        "overflowTo": "General-Support",
+        "overflowPct": 20,
+        "durationMinutes": 30,
+        "predictedSlaImpact": "+5%",
+        "predictedSlaAfterAction": 0.87
+      },
+      "note": "New-hire cohort (14 agents, 0-30 days tenure) added at 11:00, AHT +35%"
+    },
+    {
+      "skillId": "SKL-002",
+      "skillName": "General-Support",
+      "riskLevel": "healthy",
+      "currentSlaCompliance": 0.94,
+      "forecastedSlaCompliance": 0.93,
+      "queueDepth": 8,
+      "agentsAvailable": 62,
+      "agentsRequired": 55,
+      "recommendation": null,
+      "note": "Capacity available — can absorb Banking overflow"
+    },
+    {
+      "skillId": "SKL-003",
+      "skillName": "Collections",
+      "riskLevel": "warning",
+      "currentSlaCompliance": 0.88,
+      "forecastedSlaCompliance": 0.86,
+      "queueDepth": 15,
+      "agentsAvailable": 19,
+      "agentsRequired": 21,
+      "recommendation": {
+        "action": "monitor",
+        "overflowTo": null,
+        "overflowPct": 0,
+        "durationMinutes": 0,
+        "predictedSlaImpact": "0%",
+        "predictedSlaAfterAction": 0.86
+      },
+      "note": "Slightly under-staffed but within acceptable range"
+    }
+  ]
+}

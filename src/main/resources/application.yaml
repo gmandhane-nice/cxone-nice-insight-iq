@@ -1,0 +1,66 @@
+server:
+  port: 8080
+
+agentic:
+  bedrock:
+    region: us-east-1
+    fallback-region: us-west-2
+    api-key: ${BEDROCK_API_KEY:}
+    model-id: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+    haiku-model-id: us.anthropic.claude-haiku-4-5-20251001-v1:0
+    max-tokens: 2048
+    temperature: 0.2
+    max-agent-iterations: 6
+  coach:
+    haiku-model-id: us.anthropic.claude-haiku-4-5-20251001-v1:0
+    fallback-haiku-model-id: anthropic.claude-haiku-20240307-v1:0
+    max-tokens: 512
+    temperature: 0.4
+  tool-scope: rca
+  tenant-id: ${TENANT_ID:11efd95f-eed7-42e0-a6c9-0242ac110002}
+  watchdog:
+    enabled: true
+    interval-ms: 60000
+    sla-threshold: 0.85
+    aht-drift-threshold-pct: 20
+    auto-coach-enabled: true
+
+spring:
+  mvc:
+    async:
+      request-timeout: 120000
+
+snowflake:
+  account: ${SNOWFLAKE_ACCOUNT:placeholder-account}
+  user: ${SNOWFLAKE_USER:placeholder-user}
+  password: ${SNOWFLAKE_PASSWORD:placeholder-password}
+  warehouse: ${SNOWFLAKE_WAREHOUSE:placeholder-warehouse}
+  database: ${SNOWFLAKE_DATABASE:DATAHUB}
+  schema: ${SNOWFLAKE_SCHEMA:SUITE_REFINED}
+  role: ${SNOWFLAKE_ROLE:placeholder-role}
+  query-timeout: 60
+
+# OpenSearch — dev tunnel: localhost:6380 → cxcv-opensearch.dev.wfosaas.internal.com:443
+opensearch:
+  endpoint: ${OPENSEARCH_ENDPOINT:https://localhost:6380}
+  username: ${OPENSEARCH_USERNAME:}
+  password: ${OPENSEARCH_PASSWORD:}
+  region: ${AWS_REGION:us-west-2}
+  running-locally: ${OPENSEARCH_LOCAL:true}
+  max-conn-total: 10
+  connect-timeout: 5000
+  connection-max-idle-time: 30000
+  connection-acquisition-timeout: 5000
+  index:
+    agent-contact: agent-contact-write-alias
+    agent-contact-activity: agent-contact-activity-write-alias
+
+# Valkey — dev tunnel: localhost:6379 → clustercfg.dev-cxcv-ctact-valkey.ibtpaj.usw2.cache.amazonaws.com:6379
+valkey:
+  host: ${VALKEY_HOST:localhost}
+  port: ${VALKEY_PORT:6379}
+
+logging:
+  level:
+    com.nice.agentic: INFO
+    software.amazon.awssdk: WARN

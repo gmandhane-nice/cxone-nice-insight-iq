@@ -1,0 +1,15 @@
+{
+  "agentId": "AG-042",
+  "agentName": "Jordan M.",
+  "metric": "AHT",
+  "currentValue": 612,
+  "baselineValue": 498,
+  "deltaPct": 22.9,
+  "unit": "seconds",
+  "recentContactTypes": ["billing-dispute", "billing-dispute", "account-inquiry"],
+  "skillName": "Banking",
+  "shiftStartTime": "11:00",
+  "tenureCategory": "0-30 days",
+  "moduleReference": "B4",
+  "moduleTitle": "De-escalation Techniques for Billing Disputes"
+}
