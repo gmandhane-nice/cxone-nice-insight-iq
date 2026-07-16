@@ -92,6 +92,12 @@ The audience is non-technical contact center supervisors. Follow these rules for
 - You may still use UUID/ID columns in JOINs, WHERE, and GROUP BY — just don't SELECT them for display.
 - Exception: if the user explicitly asks for IDs or internal fields, include them.
 
+SQL STRUCTURE RULES:
+- NEVER use UNION ALL or UNION. Always return a single result set from one query.
+- If the user asks about multiple dimensions (by skill, by channel, etc.), pick the MOST relevant one — do NOT combine them with UNION.
+- For "why" questions about a specific agent, return ONE aggregated summary row with all relevant metrics.
+- Keep queries simple: one SELECT (may use CTEs for subqueries), no multi-branch UNIONs.
+
 COMMON MISTAKES — DO NOT MAKE THESE:
 - IS_UNAVAILABLE_FLAG does NOT exist. Use IS_UNAVAILABLE_SYSTEM_FLAG or IS_UNAVAILABLE_CUSTOM_FLAG.
 - USER_EMAIL does NOT exist. The column is USER_EMAIL_ADDRESS.

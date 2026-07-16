@@ -438,12 +438,15 @@
           <th>Risk</th>
           <th class="sla-cell">SLA Now</th>
           <th class="sla-cell">SLA Forecast</th>
-          <th>Queue Depth</th>
-          <th>Top Recommendation</th>
+          <th>Open Contacts</th>
+          <th>Contacts (period)</th>
+          <th>Avg Handle Time</th>
+          <th>Agents</th>
+          <th>Action</th>
         </tr>
       </thead>
       <tbody id="riskTableBody">
-        <tr class="loading-row"><td colspan="6">Loading risk data&hellip;</td></tr>
+        <tr class="loading-row"><td colspan="9">Loading risk data&hellip;</td></tr>
       </tbody>
     </table>
   </section>
@@ -451,13 +454,39 @@
   <!-- ============ AGENT PANEL ============ -->
   <section id="panel-agent" class="panel">
     <div class="agent-view">
-      <h2>Agent Console</h2>
-      <p class="agent-info">Agent: AG-042 &nbsp;|&nbsp; Skill: Banking &nbsp;|&nbsp; Shift: 11:00–19:00</p>
-      <div class="placeholder-content">
-        <p>Agent performance dashboard would appear here.</p>
-        <p>Nudge overlay appears in the bottom-right corner when coaching is triggered.</p>
-        <p style="margin-top:16px;font-size:12px;color:rgba(230,237,243,0.35);">Listening for coaching nudges on /coach/nudges/stream&hellip;</p>
+      <div class="risk-header">
+        <h2>Agent Performance Dashboard</h2>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <span class="last-updated" id="agentLastUpdated"></span>
+          <button class="refresh-btn" onclick="agentLoad()">Refresh</button>
+        </div>
       </div>
+
+      <!-- KPI Summary Cards -->
+      <div class="kpi-grid" id="agentKpiGrid">
+        <div class="kpi-card"><div class="kpi-value">--</div><div class="kpi-label">Total Agents</div></div>
+        <div class="kpi-card"><div class="kpi-value">--</div><div class="kpi-label">Team Avg AHT</div></div>
+        <div class="kpi-card"><div class="kpi-value">--</div><div class="kpi-label">Team SLA %</div></div>
+      </div>
+
+      <!-- Agent Performance Table -->
+      <table class="risk-table" id="agentTable">
+        <thead>
+          <tr>
+            <th>Agent Name</th>
+            <th>Performance</th>
+            <th>Contacts (7d)</th>
+            <th>Avg Handle Time</th>
+            <th>Avg Talk Time</th>
+            <th>Avg Hold Time</th>
+            <th>Avg ACW</th>
+            <th>SLA %</th>
+          </tr>
+        </thead>
+        <tbody id="agentTableBody">
+          <tr class="loading-row"><td colspan="8">Loading agent data&hellip;</td></tr>
+        </tbody>
+      </table>
     </div>
   </section>
 
@@ -524,6 +553,47 @@ function slaBar(val) {
   </div>`;
 }
 
+function formatAnalysisText(text) {
+  const lines = text.split('\n');
+  let html = '';
+  let inSection = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+
+    // Detect section headers (emoji + title pattern)
+    if (/^[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(line) && !line.startsWith('•')) {
+      if (inSection) html += '</ul></div>';
+      const headerColor = line.includes('KEY FINDING') || line.includes('ROOT CAUSE') || line.includes('⚠') ? '#e0a040'
+          : line.includes('EVIDENCE') || line.includes('SUMMARY') || line.includes('📊') ? '#7bd88f'
+          : line.includes('RECOMMENDATION') || line.includes('✅') ? '#2f6feb'
+          : line.includes('INSIGHT') || line.includes('💡') ? '#c4a0ff'
+          : 'var(--accent-green)';
+      html += '<div style="margin-top:12px;">';
+      html += '<div style="font-weight:600;font-size:14px;margin-bottom:6px;color:' + headerColor + ';">' + esc(line) + '</div>';
+      html += '<ul style="margin:0;padding-left:16px;list-style:none;">';
+      inSection = true;
+    } else if (line.startsWith('•')) {
+      const bullet = line.substring(1).trim();
+      html += '<li style="font-size:13px;line-height:1.7;color:var(--text-primary);margin-bottom:4px;padding-left:12px;position:relative;">';
+      html += '<span style="position:absolute;left:0;color:var(--text-muted);">•</span>' + esc(bullet) + '</li>';
+    } else if (/^\d+\.\s/.test(line)) {
+      // Numbered list item
+      html += '<li style="font-size:13px;line-height:1.7;color:var(--text-primary);margin-bottom:4px;">' + esc(line) + '</li>';
+    } else {
+      // Plain text line — treat as paragraph
+      if (!inSection) {
+        html += '<div style="font-size:13px;line-height:1.7;color:var(--text-primary);margin-bottom:6px;">' + esc(line) + '</div>';
+      } else {
+        html += '<li style="font-size:13px;line-height:1.7;color:var(--text-primary);margin-bottom:4px;padding-left:12px;">' + esc(line) + '</li>';
+      }
+    }
+  }
+  if (inSection) html += '</ul></div>';
+  return html;
+}
+
 /* ============================================================
    CHAT — Conversation-style (appending messages)
    ============================================================ */
@@ -535,8 +605,8 @@ function chatFill(t) {
   document.getElementById('chatInput').focus();
 }
 
-function chatFillAndAsk(t) {
-  document.getElementById('chatInput').value = t;
+function chatFillAndAsk(q) {
+  document.getElementById('chatInput').value = q;
   chatAsk();
 }
 
@@ -690,9 +760,9 @@ function buildAnswerHtml(answerJson) {
   if (parsed.type === 'data_result') return buildDataResultHtml(parsed);
   if (parsed.type === 'rca_result') return buildRcaResultHtml(parsed);
 
-  // Legacy fallback
+  // Legacy fallback (summary + causes from non-streaming RCA)
   let html = '';
-  if (parsed.summary) html += '<div class="summary">' + esc(parsed.summary) + '</div>';
+  if (parsed.summary) html += formatAnalysisText(parsed.summary);
   if (parsed.causes && parsed.causes.length) {
     for (const c of parsed.causes) {
       html += '<div class="cause-card"><div class="cause-header"><span class="cause-title">' + esc(c.title || '') + '</span></div>';
@@ -704,6 +774,19 @@ function buildAnswerHtml(answerJson) {
       html += '</div>';
     }
   }
+
+  // Suggested Actions for legacy RCA
+  const legacyActions = parsed.suggestedActions || [];
+  if (legacyActions.length > 0) {
+    html += '<div class="suggested-actions">';
+    html += '<div class="suggested-actions-title">Dig Deeper — Get Evidence</div>';
+    for (let i = 0; i < legacyActions.length; i++) {
+      const query = (legacyActions[i].query || legacyActions[i].label).replace(/"/g, '&quot;');
+      html += '<button class="action-btn" onclick="chatFillAndAsk(this.dataset.q)" data-q="' + query + '">' + esc(legacyActions[i].label) + '</button>';
+    }
+    html += '</div>';
+  }
+
   return html || '<div style="color:var(--text-muted);">No results.</div>';
 }
 
@@ -759,7 +842,7 @@ function buildDataResultHtml(parsed) {
     html += '<div style="color:var(--text-muted);font-size:13px;padding:12px;">No data found for your query.</div>';
   }
 
-  // Summary — render FULL text, no truncation
+  // Summary — render with bullet point formatting
   const summary = parsed.summary || '';
   if (typeof summary === 'string' && summary.length > 0) {
     let text = summary;
@@ -769,8 +852,7 @@ function buildDataResultHtml(parsed) {
     text = text.replace(/^Supervisor Summary:\s*/i, '').trim();
     if (text.length > 0) {
       html += '<div style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px;">';
-      html += '<div style="font-weight:600;font-size:14px;margin-bottom:8px;color:var(--accent-green);">Analysis</div>';
-      html += '<div style="font-size:14px;color:var(--text-primary);line-height:1.8;white-space:pre-wrap;">' + esc(text) + '</div>';
+      html += formatAnalysisText(text);
       html += '</div>';
     }
   }
@@ -780,9 +862,9 @@ function buildDataResultHtml(parsed) {
   if (actions.length > 0) {
     html += '<div class="suggested-actions">';
     html += '<div class="suggested-actions-title">Recommended Next Steps</div>';
-    for (const action of actions) {
-      const query = action.query || action.label;
-      html += '<button class="action-btn" onclick="chatFillAndAsk(\'' + esc(query).replace(/'/g, "\\'") + '\')">' + esc(action.label) + '</button>';
+    for (let i = 0; i < actions.length; i++) {
+      const query = (actions[i].query || actions[i].label).replace(/"/g, '&quot;');
+      html += '<button class="action-btn" onclick="chatFillAndAsk(this.dataset.q)" data-q="' + query + '">' + esc(actions[i].label) + '</button>';
     }
     html += '</div>';
   }
@@ -897,7 +979,7 @@ function buildRcaResultHtml(parsed) {
   const analysis = parsed.analysis || {};
 
   if (analysis.summary) {
-    html += '<div class="summary">' + esc(analysis.summary) + '</div>';
+    html += formatAnalysisText(analysis.summary);
   }
   if (analysis.recommendations && analysis.recommendations.length) {
     html += '<div style="font-weight:600;margin-bottom:8px;">Recommendations</div>';
@@ -927,6 +1009,18 @@ function buildRcaResultHtml(parsed) {
         }
       }
     }
+  }
+
+  // Suggested Actions for RCA results
+  const actions = parsed.suggestedActions || [];
+  if (actions.length > 0) {
+    html += '<div class="suggested-actions">';
+    html += '<div class="suggested-actions-title">Dig Deeper — Get Evidence</div>';
+    for (let i = 0; i < actions.length; i++) {
+      const query = (actions[i].query || actions[i].label).replace(/"/g, '&quot;');
+      html += '<button class="action-btn" onclick="chatFillAndAsk(this.dataset.q)" data-q="' + query + '">' + esc(actions[i].label) + '</button>';
+    }
+    html += '</div>';
   }
 
   return html;
@@ -960,24 +1054,39 @@ function riskLoad() {
 function riskRender(skills) {
   const tbody = document.getElementById('riskTableBody');
   if (!skills.length) {
-    tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No skill data available.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="empty-state">No skill data available.</td></tr>';
     return;
   }
   let html = '';
   for (const s of skills) {
     const rowClass = 'row-' + (s.riskLevel || 'healthy');
     const badgeClass = 'badge-' + (s.riskLevel || 'healthy');
-    let rec = '<span class="text-muted">Monitor</span>';
+    let rec = '<span class="text-muted">-</span>';
     if (s.recommendation && s.recommendation.action === 'overflow') {
-      rec = '<span class="rec-text">Overflow ' + esc(s.recommendation.overflowPct) + '% to '
-          + esc(s.recommendation.overflowTo) + ' &rarr; ' + esc(s.recommendation.predictedSlaImpact) + '</span>';
+      rec = '<span class="rec-text" style="color:var(--badge-at-risk);">Overflow ' + esc(s.recommendation.overflowPct) + '% to '
+          + esc(s.recommendation.overflowTo) + '</span>';
+    } else if (s.recommendation && s.recommendation.action === 'monitor') {
+      rec = '<span class="rec-text" style="color:var(--badge-warning);">Monitor closely</span>';
     }
+    // Format AHT
+    let ahtDisplay = '-';
+    if (s.avgHandleTime) {
+      if (s.avgHandleTime > 3600) ahtDisplay = (s.avgHandleTime / 3600).toFixed(1) + ' hrs';
+      else if (s.avgHandleTime > 60) ahtDisplay = (s.avgHandleTime / 60).toFixed(1) + ' min';
+      else ahtDisplay = s.avgHandleTime.toFixed(0) + ' sec';
+    }
+    // Format contact count
+    let contactDisplay = s.contactCount ? s.contactCount.toLocaleString() : '-';
+
     html += '<tr class="' + rowClass + '">';
     html += '<td class="skill-name">' + esc(s.skillName) + '</td>';
     html += '<td><span class="risk-badge ' + badgeClass + '">' + esc(s.riskLevel || 'healthy') + '</span></td>';
     html += '<td class="sla-cell">' + slaBar(s.currentSlaCompliance) + '</td>';
     html += '<td class="sla-cell">' + slaBar(s.forecastedSlaCompliance) + '</td>';
     html += '<td>' + esc(s.queueDepth) + '</td>';
+    html += '<td>' + contactDisplay + '</td>';
+    html += '<td>' + ahtDisplay + '</td>';
+    html += '<td>' + (s.agentsAvailable || '-') + '</td>';
     html += '<td>' + rec + '</td>';
     html += '</tr>';
   }
@@ -1045,6 +1154,97 @@ function nudgeDismiss() {
 
 // Start nudge stream immediately
 nudgeConnect();
+
+/* ============================================================
+   AGENT PERFORMANCE DASHBOARD
+   ============================================================ */
+let agentDataLoaded = false;
+
+function agentLoad() {
+  const tbody = document.getElementById('agentTableBody');
+  tbody.innerHTML = '<tr class="loading-row"><td colspan="8">Loading agent data&hellip;</td></tr>';
+
+  fetch('/agents/performance')
+    .then(r => {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    })
+    .then(data => {
+      agentRenderKpis(data.teamMetrics || {});
+      agentRenderTable(data.agents || []);
+      document.getElementById('agentLastUpdated').textContent = 'Last updated: ' + new Date().toLocaleTimeString();
+      agentDataLoaded = true;
+    })
+    .catch(err => {
+      tbody.innerHTML = '<tr class="loading-row"><td colspan="8" style="color:#e05252;">Failed to load: ' + esc(err.message) + '</td></tr>';
+    });
+}
+
+function formatAht(seconds) {
+  if (seconds == null || seconds === 0) return '-';
+  if (seconds >= 3600) return (seconds / 3600).toFixed(1) + ' hrs';
+  if (seconds >= 60) return (seconds / 60).toFixed(1) + ' min';
+  return seconds.toFixed(0) + ' sec';
+}
+
+function agentRenderKpis(metrics) {
+  const grid = document.getElementById('agentKpiGrid');
+  const aht = metrics.avgHandleTime || 0;
+  const sla = metrics.teamSla || 0;
+
+  let ahtClass = '';
+  if (aht > 3600) ahtClass = 'alert';
+  else if (aht > 600) ahtClass = 'warn';
+  else ahtClass = 'good';
+
+  let slaClass = '';
+  if (sla >= 90) slaClass = 'good';
+  else if (sla >= 80) slaClass = 'warn';
+  else slaClass = 'alert';
+
+  grid.innerHTML = ''
+    + '<div class="kpi-card"><div class="kpi-value">' + esc(String(metrics.totalAgents || 0)) + '</div><div class="kpi-label">Total Agents</div></div>'
+    + '<div class="kpi-card"><div class="kpi-value ' + ahtClass + '">' + formatAht(aht) + '</div><div class="kpi-label">Team Avg AHT</div></div>'
+    + '<div class="kpi-card"><div class="kpi-value ' + slaClass + '">' + esc(sla.toFixed(1)) + '%</div><div class="kpi-label">Team SLA %</div></div>';
+}
+
+function agentRenderTable(agents) {
+  const tbody = document.getElementById('agentTableBody');
+  if (!agents.length) {
+    tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No agent data available.</td></tr>';
+    return;
+  }
+  let html = '';
+  for (const a of agents) {
+    const level = a.performanceLevel || 'good';
+    let badgeClass = 'badge-healthy';
+    let badgeLabel = 'Good';
+    if (level === 'critical') { badgeClass = 'badge-at-risk'; badgeLabel = 'Critical'; }
+    else if (level === 'attention') { badgeClass = 'badge-warning'; badgeLabel = 'Attention'; }
+
+    const rowClass = level === 'critical' ? 'row-at-risk' : (level === 'attention' ? 'row-warning' : '');
+
+    html += '<tr class="' + rowClass + '">';
+    html += '<td class="skill-name">' + esc((a.firstName || '') + ' ' + (a.lastName || '')) + '</td>';
+    html += '<td><span class="risk-badge ' + badgeClass + '">' + badgeLabel + '</span></td>';
+    html += '<td>' + (a.contactCount ? a.contactCount.toLocaleString() : '-') + '</td>';
+    html += '<td>' + formatAht(a.avgHandleTime) + '</td>';
+    html += '<td>' + formatAht(a.avgTalkTime) + '</td>';
+    html += '<td>' + formatAht(a.avgHoldTime) + '</td>';
+    html += '<td>' + formatAht(a.avgAcw) + '</td>';
+    html += '<td>' + (a.slaPct != null ? a.slaPct.toFixed(1) + '%' : '-') + '</td>';
+    html += '</tr>';
+  }
+  tbody.innerHTML = html;
+}
+
+/* Load agent data when Agent View tab is clicked */
+(function patchAgentTab() {
+  const agentBtn = document.querySelectorAll('nav button')[2];
+  agentBtn.addEventListener('click', function() {
+    if (!agentDataLoaded) agentLoad();
+  });
+})();
 </script>
 </body>
 </html>

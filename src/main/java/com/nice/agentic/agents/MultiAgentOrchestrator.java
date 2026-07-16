@@ -155,31 +155,50 @@ public class MultiAgentOrchestrator {
                                 "Results (" + actualTotal + " total rows, showing " + rows.size() + ", columns: " + columns + "):\n" + dataJson +
                                 totalNote +
                                 "\n\nYou are a contact center RCA analyst. Based on the data above, provide a root cause analysis." +
-                                " Structure your response as plain text with:" +
-                                "\n1. KEY FINDING: One sentence stating the main observation. Always mention the ACTUAL TOTAL count." +
-                                "\n2. ROOT CAUSE: What the data shows is causing the issue (e.g., high hold time, excessive ACW, long talk time)." +
-                                "\n3. EVIDENCE: 2-3 specific data points from the results that support your conclusion." +
-                                "\n4. RECOMMENDATION: One actionable step the supervisor should take." +
-                                "\n\nBe direct and specific with numbers from the data. Do NOT use markdown, code fences, or JSON.";
+                                "\nFormat your response EXACTLY like this (use bullet points with • character):" +
+                                "\n\n🔍 KEY FINDING:" +
+                                "\n• One clear sentence about the main issue. Include the ACTUAL TOTAL count." +
+                                "\n\n⚠️ ROOT CAUSE:" +
+                                "\n• What is causing it (be specific — name the metric, channel, or behavior)" +
+                                "\n• Supporting detail (e.g., which time period, which channel)" +
+                                "\n\n📊 EVIDENCE:" +
+                                "\n• Data point 1 with exact numbers" +
+                                "\n• Data point 2 with exact numbers" +
+                                "\n• Data point 3 with exact numbers (if relevant)" +
+                                "\n\n✅ RECOMMENDATION:" +
+                                "\n• Concrete action the supervisor should take immediately" +
+                                "\n• Expected impact of taking this action" +
+                                "\n\nRules:" +
+                                "\n- Be specific with numbers (counts, percentages, durations)." +
+                                "\n- Each bullet must be one concise sentence — no paragraphs." +
+                                "\n- Do NOT use markdown (no **, no ##, no ```). Use plain text with • bullets." +
+                                "\n- Use the emoji headers exactly as shown above.";
                     } else {
                         summaryPrompt = "User asked: \"" + question + "\"\n\n" +
                                 "SQL executed: " + sql + "\n\n" +
                                 "Results (" + actualTotal + " total rows, showing " + rows.size() + ", columns: " + columns + "):\n" + dataJson +
                                 totalNote +
-                                "\n\nProvide a brief 2-3 sentence plain-text summary of the key findings." +
-                                " Always report the ACTUAL TOTAL count (" + actualTotal + "), not the display limit." +
-                                " Focus on what a contact center supervisor would care about." +
-                                " Be direct and specific with numbers." +
-                                " Do NOT use markdown, code fences, JSON, or bullet points — just plain sentences.";
+                                "\n\nProvide a concise analysis using bullet points." +
+                                "\nFormat your response EXACTLY like this:" +
+                                "\n\n📊 SUMMARY:" +
+                                "\n• Key finding #1 with specific numbers" +
+                                "\n• Key finding #2 with specific numbers" +
+                                "\n• Key finding #3 (if relevant)" +
+                                "\n\n💡 INSIGHT:" +
+                                "\n• What this means for the supervisor — one actionable sentence" +
+                                "\n\nRules:" +
+                                "\n- Always report the ACTUAL TOTAL count (" + actualTotal + "), not the display limit." +
+                                "\n- Focus on what a contact center supervisor would care about." +
+                                "\n- Be specific with numbers (agents, contacts, durations, percentages)." +
+                                "\n- Each bullet is one concise sentence — no paragraphs." +
+                                "\n- Do NOT use markdown (no **, no ##, no ```). Use plain text with • bullets." +
+                                "\n- Use the emoji headers exactly as shown above.";
                     }
 
                     String summary = callBedrockForAnalysis(summaryPrompt);
 
-                    // Generate suggested actions deterministically for "why" questions
-                    List<Map<String, String>> suggestedActions = new ArrayList<>();
-                    if (isWhyQuestion) {
-                        suggestedActions = generateSuggestedActions(question, summary, columns, rows);
-                    }
+                    // Generate suggested follow-up actions using LLM (context-aware)
+                    List<Map<String, String>> suggestedActions = generateLlmSuggestedActions(question, summary, columns, rows);
 
                     onEvent.accept(new AgentEvent("reasoning", "analyzer", "completed",
                             "Analysis complete", summary));
@@ -242,7 +261,8 @@ public class MultiAgentOrchestrator {
             onEvent.accept(new AgentEvent("recommending", "recommendation", "completed", "Recommendations generated", recommendationsJson));
 
             // Phase 5: Complete — include evidence as proof alongside recommendations
-            String finalResult = buildRcaResponse(evidence, recommendationsJson);
+            List<Map<String, String>> rcaActions = generateLlmRcaSuggestedActions(question, recommendationsJson, hypothesesJson);
+            String finalResult = buildRcaResponse(evidence, recommendationsJson, rcaActions);
             onEvent.accept(new AgentEvent("complete", "orchestrator", "completed", "Investigation complete", finalResult));
 
             return finalResult;
@@ -284,76 +304,67 @@ public class MultiAgentOrchestrator {
         }
     }
 
-    private List<Map<String, String>> generateSuggestedActions(String question, String summary, List<String> columns, List<Map<String, Object>> rows) {
-        List<Map<String, String>> actions = new ArrayList<>();
-        String qLower = question.toLowerCase();
-        String sLower = summary.toLowerCase();
+    private List<Map<String, String>> generateLlmSuggestedActions(String question, String summary, List<String> columns, List<Map<String, Object>> rows) {
+        String dataSnippet = "";
+        try {
+            List<Map<String, Object>> sample = rows.size() > 5 ? rows.subList(0, 5) : rows;
+            dataSnippet = mapper.writeValueAsString(sample);
+        } catch (Exception ignored) {}
 
-        // Extract user name from results if present
-        String userName = "";
-        if (!rows.isEmpty()) {
-            Map<String, Object> firstRow = rows.get(0);
-            for (String col : columns) {
-                String colUpper = col.toUpperCase();
-                if (colUpper.contains("FIRST_NAME") || colUpper.contains("FIRST NAME")) {
-                    Object val = firstRow.get(col);
-                    if (val != null) userName = val.toString();
-                    break;
+        String prompt = "You are a contact center analytics assistant helping a supervisor investigate issues.\n\n" +
+                "The user just asked: \"" + question + "\"\n\n" +
+                "The system returned data with columns: " + columns + "\n" +
+                "Sample data (first few rows): " + dataSnippet + "\n\n" +
+                "Analysis summary: " + summary + "\n\n" +
+                "Based on what the user ALREADY received, suggest 3-4 NEXT STEPS the supervisor should take to dig deeper.\n" +
+                "DO NOT suggest anything the user already asked or already has in front of them.\n" +
+                "Each suggestion must be a concrete query they can run to get EVIDENCE or PROOF.\n\n" +
+                "Return ONLY a JSON array with objects having \"label\" (short button text, max 5 words) and \"query\" (the full question to ask the system).\n" +
+                "Example: [{\"label\":\"Show daily trend\",\"query\":\"Show daily contact count for PerfUser_0011 over last 7 days\"}]\n\n" +
+                "Return ONLY the JSON array, no other text.";
+
+        String response = callBedrockForAnalysis(prompt);
+        return parseSuggestedActionsJson(response);
+    }
+
+    private List<Map<String, String>> generateLlmRcaSuggestedActions(String question, String recommendationsJson, String hypothesesJson) {
+        String prompt = "You are a contact center analytics assistant helping a supervisor investigate root causes.\n\n" +
+                "The user asked: \"" + question + "\"\n\n" +
+                "The system performed a full root cause analysis and found:\n" + recommendationsJson + "\n\n" +
+                "Hypotheses investigated:\n" + hypothesesJson + "\n\n" +
+                "Based on this RCA, suggest 3-4 NEXT STEPS the supervisor should take to verify the findings or take action.\n" +
+                "Each suggestion should help them get EVIDENCE, PROOF, or take a concrete action.\n" +
+                "DO NOT repeat what was already analyzed — suggest what comes NEXT.\n\n" +
+                "Return ONLY a JSON array with objects having \"label\" (short button text, max 5 words) and \"query\" (the full question to ask the system).\n" +
+                "Example: [{\"label\":\"Show stuck contacts\",\"query\":\"Show all contacts with duration over 1 hour and zero talk time for PerfUser_0011\"}]\n\n" +
+                "Return ONLY the JSON array, no other text.";
+
+        String response = callBedrockForAnalysis(prompt);
+        return parseSuggestedActionsJson(response);
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, String>> parseSuggestedActionsJson(String response) {
+        try {
+            String cleaned = response.trim();
+            // Strip code fences if present
+            cleaned = cleaned.replaceAll("^```(?:json)?\\s*", "").replaceAll("\\s*```$", "").trim();
+            List<Map<String, String>> actions = mapper.readValue(cleaned,
+                    mapper.getTypeFactory().constructCollectionType(List.class, Map.class));
+            // Cap at 4 and validate
+            List<Map<String, String>> valid = new ArrayList<>();
+            for (Map<String, String> action : actions) {
+                if (action.containsKey("label") && action.containsKey("query") && valid.size() < 4) {
+                    valid.add(Map.of("label", action.get("label"), "query", action.get("query")));
                 }
             }
+            return valid;
+        } catch (Exception e) {
+            log.warn("Failed to parse LLM suggested actions: {}", e.getMessage());
+            return List.of();
         }
-
-        // Stuck contacts / high active time pattern
-        if (sLower.contains("stuck") || sLower.contains("not closed") || sLower.contains("left open") ||
-                sLower.contains("active time") && sLower.contains("high")) {
-            if (!userName.isEmpty()) {
-                actions.add(Map.of("label", "Fetch all stuck contacts", "query", "Show all stuck contacts for " + userName + " that are still open"));
-            }
-            actions.add(Map.of("label", "View recommended actions", "query", "How can I fix stuck contacts and what actions should I take"));
-        }
-
-        // High AHT pattern
-        if (qLower.contains("aht") || qLower.contains("handle time") || sLower.contains("handle time")) {
-            if (!userName.isEmpty()) {
-                actions.add(Map.of("label", "Check contact details", "query", "Show recent contacts for " + userName + " with duration breakdown"));
-                actions.add(Map.of("label", "Compare with team", "query", "Show average AHT for all agents and compare with " + userName));
-            }
-        }
-
-        // High hold time pattern
-        if (sLower.contains("hold time") || sLower.contains("hold") && sLower.contains("high")) {
-            if (!userName.isEmpty()) {
-                actions.add(Map.of("label", "Show high hold contacts", "query", "Show contacts with highest hold time for " + userName));
-            }
-        }
-
-        // Unavailable / break pattern
-        if (qLower.contains("unavailable") || qLower.contains("break") || sLower.contains("unavailable")) {
-            if (!userName.isEmpty()) {
-                actions.add(Map.of("label", "Show break details", "query", "Show all unavailable sessions for " + userName + " with state names and durations"));
-            }
-            actions.add(Map.of("label", "Compare break patterns", "query", "Which agents have the most unavailable time in the last 7 days"));
-        }
-
-        // Email specific pattern
-        if (sLower.contains("email") && (sLower.contains("open") || sLower.contains("left") || sLower.contains("high"))) {
-            if (!userName.isEmpty()) {
-                actions.add(Map.of("label", "Show open emails", "query", "Show all email contacts still open for " + userName));
-            }
-        }
-
-        // Always add a general drill-down if we have a user
-        if (!userName.isEmpty() && actions.size() < 4) {
-            actions.add(Map.of("label", "Show agent session history", "query", "Show recent session timeline for " + userName));
-        }
-
-        // Cap at 4 actions
-        if (actions.size() > 4) {
-            actions = new ArrayList<>(actions.subList(0, 4));
-        }
-
-        return actions;
     }
+
 
     private String buildDirectDataResponse(Map<String, Object> tableData, String summary, List<Map<String, String>> suggestedActions) {
         try {
@@ -382,22 +393,25 @@ public class MultiAgentOrchestrator {
         }
     }
 
-    private String buildRcaResponse(Map<String, String> evidence, String recommendationsJson) {
+    private String buildRcaResponse(Map<String, String> evidence, String recommendationsJson, List<Map<String, String>> suggestedActions) {
         try {
             Map<String, Object> response = new LinkedHashMap<>();
             response.put("type", "rca_result");
             response.put("evidence", evidence);
-            // Parse recommendations if valid JSON, otherwise wrap as string
             try {
                 response.put("analysis", mapper.readTree(recommendationsJson));
             } catch (Exception e) {
                 response.put("analysis", recommendationsJson);
+            }
+            if (suggestedActions != null && !suggestedActions.isEmpty()) {
+                response.put("suggestedActions", suggestedActions);
             }
             return mapper.writeValueAsString(response);
         } catch (JsonProcessingException e) {
             return recommendationsJson;
         }
     }
+
 
     private Plan parsePlan(String planJson) {
         try {
