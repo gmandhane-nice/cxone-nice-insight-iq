@@ -55,6 +55,8 @@ public class SnowflakeExecutor {
     private final String account;
     private final String user;
     private final String password;
+    private final String token;
+    private final String authenticator;
     private final String warehouse;
     private final String database;
     private final String role;
@@ -67,25 +69,30 @@ public class SnowflakeExecutor {
     public SnowflakeExecutor(
             @Value("${snowflake.account:placeholder-account}")    String account,
             @Value("${snowflake.user:placeholder-user}")          String user,
-            @Value("${snowflake.password:placeholder-password}")  String password,
+            @Value("${snowflake.password:}")                      String password,
+            @Value("${snowflake.token:}")                         String token,
+            @Value("${snowflake.authenticator:}")                 String authenticator,
             @Value("${snowflake.warehouse:placeholder-warehouse}") String warehouse,
             @Value("${snowflake.database:DATAHUB}")               String database,
             @Value("${snowflake.role:placeholder-role}")          String role,
             @Value("${snowflake.schema:SUITE_REFINED}")           String schema,
             @Value("${snowflake.query-timeout:60}")               int queryTimeout) {
-        this.account      = account;
-        this.user         = user;
-        this.password     = password;
-        this.warehouse    = warehouse;
-        this.database     = database;
-        this.role         = role;
-        this.schema       = schema;
-        this.queryTimeout = queryTimeout;
+        this.account       = account;
+        this.user          = user;
+        this.password      = password;
+        this.token         = token;
+        this.authenticator = authenticator;
+        this.warehouse     = warehouse;
+        this.database      = database;
+        this.role          = role;
+        this.schema        = schema;
+        this.queryTimeout  = queryTimeout;
 
-        // Consider configured only when none of the values are the placeholder defaults
+        boolean hasToken = token != null && !token.isBlank();
+        boolean hasPassword = password != null && !password.isBlank() && !password.contains("placeholder");
         this.configured = !account.contains("placeholder")
                 && !user.contains("placeholder")
-                && !password.contains("placeholder");
+                && (hasToken || hasPassword);
 
         if (configured) {
             try {
@@ -93,10 +100,11 @@ public class SnowflakeExecutor {
             } catch (ClassNotFoundException e) {
                 log.error("Snowflake JDBC driver not found on classpath");
             }
-            log.info("SnowflakeExecutor initialised — account={} database={}", account, database);
+            String authMode = hasToken ? "programmatic_access_token" : "password";
+            log.info("SnowflakeExecutor initialised — account={} database={} auth={}", account, database, authMode);
         } else {
             log.warn("SnowflakeExecutor is NOT configured (placeholder credentials) — " +
-                    "set SNOWFLAKE_* env vars to enable real queries");
+                    "set snowflake.* properties to enable real queries");
         }
     }
 
@@ -135,7 +143,12 @@ public class SnowflakeExecutor {
 
         java.util.Properties props = new java.util.Properties();
         props.put("user", user);
-        props.put("password", password);
+        if (token != null && !token.isBlank()) {
+            props.put("authenticator", "programmatic_access_token");
+            props.put("token", token);
+        } else {
+            props.put("password", password);
+        }
         props.put("JDBC_QUERY_RESULT_FORMAT", "JSON");
 
         try (Connection conn = DriverManager.getConnection(url, props);

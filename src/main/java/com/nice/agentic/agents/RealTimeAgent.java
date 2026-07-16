@@ -1,6 +1,7 @@
 package com.nice.agentic.agents;
 
 import com.nice.agentic.BedrockConfig;
+import com.nice.agentic.tools.AdHocQueryTool;
 import com.nice.agentic.tools.AgentTool;
 import com.nice.agentic.tools.MetricSnapshotTool;
 import com.nice.agentic.tools.QueueStateTool;
@@ -42,7 +43,8 @@ public class RealTimeAgent implements SubAgent {
                          @Value("${agentic.bedrock.haiku-model-id:}") String haikuModelId,
                          QueueStateTool queueStateTool,
                          StaffingSnapshotTool staffingSnapshotTool,
-                         MetricSnapshotTool metricSnapshotTool) throws IOException {
+                         MetricSnapshotTool metricSnapshotTool,
+                         AdHocQueryTool adHocQueryTool) throws IOException {
         this.bedrock = bedrock;
         // Use Haiku for sub-agents if configured, otherwise fall back to main model
         this.modelId = (haikuModelId != null && !haikuModelId.isEmpty())
@@ -51,11 +53,11 @@ public class RealTimeAgent implements SubAgent {
         this.maxTokens = settings.getMaxTokens();
         this.temperature = (float) settings.getTemperature();
 
-        // Register real-time tools
+        // Register real-time tools (Valkey) + ad_hoc_query (Snowflake fallback)
         this.toolsByName = new HashMap<>();
         List<Tool> bedrockTools = new ArrayList<>();
 
-        List<AgentTool> tools = List.of(queueStateTool, staffingSnapshotTool, metricSnapshotTool);
+        List<AgentTool> tools = List.of(queueStateTool, staffingSnapshotTool, metricSnapshotTool, adHocQueryTool);
         for (AgentTool t : tools) {
             toolsByName.put(t.name(), t);
             bedrockTools.add(Tool.builder()

@@ -30,8 +30,8 @@ class WidgetPayloadResolverTest {
     void setUp() {
         ValkeyWidgetClient offlineValkey = new ValkeyWidgetClient("localhost", 6379);
         SnowflakeExecutor offlineSnowflake = new SnowflakeExecutor(
-                "placeholder-account", "placeholder-user", "placeholder-password",
-                "placeholder-warehouse", "DATAHUB", "placeholder-role", "SUITE_REFINED", 60);
+                "placeholder-account", "placeholder-user", "", "",
+                "", "placeholder-warehouse", "DATAHUB", "placeholder-role", "SUITE_REFINED", 60);
         OpenSearchExecutor offlineOpenSearch = new OpenSearchExecutor("", "", "", true, 10, 5000);
         TenantContext tenantContext = new TenantContext("11efd95f-eed7-42e0-a6c9-0242ac110002");
         resolver = new WidgetPayloadResolver(offlineValkey, offlineSnowflake, offlineOpenSearch, tenantContext);
@@ -170,8 +170,8 @@ class WidgetPayloadResolverTest {
         };
 
         SnowflakeExecutor offlineSf = new SnowflakeExecutor(
-                "placeholder-account", "placeholder-user", "placeholder-password",
-                "placeholder-warehouse", "DATAHUB", "placeholder-role", "SUITE_REFINED", 60);
+                "placeholder-account", "placeholder-user", "", "",
+                "", "placeholder-warehouse", "DATAHUB", "placeholder-role", "SUITE_REFINED", 60);
         OpenSearchExecutor offlineOs = new OpenSearchExecutor("", "", "", true, 10, 5000);
         TenantContext tenantCtx = new TenantContext("11efd95f-eed7-42e0-a6c9-0242ac110002");
         WidgetPayloadResolver liveResolver = new WidgetPayloadResolver(liveValkey, offlineSf, offlineOs, tenantCtx);

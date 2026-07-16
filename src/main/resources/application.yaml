@@ -33,7 +33,9 @@ spring:
 snowflake:
   account: ${SNOWFLAKE_ACCOUNT:placeholder-account}
   user: ${SNOWFLAKE_USER:placeholder-user}
-  password: ${SNOWFLAKE_PASSWORD:placeholder-password}
+  password: ${SNOWFLAKE_PASSWORD:}
+  token: ${SNOWFLAKE_TOKEN:}
+  authenticator: ${SNOWFLAKE_AUTHENTICATOR:}
   warehouse: ${SNOWFLAKE_WAREHOUSE:placeholder-warehouse}
   database: ${SNOWFLAKE_DATABASE:DATAHUB}
   schema: ${SNOWFLAKE_SCHEMA:SUITE_REFINED}

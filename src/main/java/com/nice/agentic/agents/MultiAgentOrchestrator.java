@@ -79,20 +79,29 @@ public class MultiAgentOrchestrator {
         try {
             AdHocQueryTool.clearResults();
 
-            // Phase 1: Planning
-            onEvent.accept(new AgentEvent("planning", "orchestrator", "started", "Analyzing question and creating investigation plan", null));
-            String planJson = orchestrator.plan(question);
-            onEvent.accept(new AgentEvent("planning", "orchestrator", "completed", "Investigation plan created", planJson));
+            // FAST PATH: classify without LLM call for obvious data queries
+            boolean isDataQuery = isObviousDataQuery(question);
+            Plan plan = null;
 
-            // Parse plan to get sub-agent tasks and query type
-            Plan plan = parsePlan(planJson);
-            if (plan.tasks.isEmpty()) {
-                log.warn("Orchestrator produced empty task list");
-                return "{\"summary\":\"Unable to create investigation plan\",\"recommendations\":[]}";
+            if (isDataQuery) {
+                log.info("Fast-path: classified as data_query (skipping planner)");
+                onEvent.accept(new AgentEvent("planning", "orchestrator", "started", "Analyzing question", null));
+                onEvent.accept(new AgentEvent("planning", "orchestrator", "completed", "Query classified — executing", null));
+            } else {
+                // Only call planner for ambiguous/RCA questions
+                onEvent.accept(new AgentEvent("planning", "orchestrator", "started", "Analyzing question and creating investigation plan", null));
+                String planJson = orchestrator.plan(question);
+                onEvent.accept(new AgentEvent("planning", "orchestrator", "completed", "Investigation plan created", planJson));
+
+                plan = parsePlan(planJson);
+                if (plan.tasks.isEmpty()) {
+                    log.warn("Orchestrator produced empty task list");
+                    return "{\"summary\":\"Unable to create investigation plan\",\"recommendations\":[]}";
+                }
+                isDataQuery = "data_query".equalsIgnoreCase(plan.queryType);
             }
 
-            boolean isDataQuery = "data_query".equalsIgnoreCase(plan.queryType);
-            log.info("Query classified as: {} (tasks={})", plan.queryType, plan.tasks.size());
+            log.info("Query classified as: {}", isDataQuery ? "data_query" : "rca");
 
             // DATA QUERY: LLM generates SQL → execute → LLM summarizes → table + summary
             if (isDataQuery) {
@@ -196,9 +205,7 @@ public class MultiAgentOrchestrator {
                     }
 
                     String summary = callBedrockForAnalysis(summaryPrompt);
-
-                    // Generate suggested follow-up actions using LLM (context-aware)
-                    List<Map<String, String>> suggestedActions = generateLlmSuggestedActions(question, summary, columns, rows);
+                    List<Map<String, String>> suggestedActions = List.of(); // loaded async by frontend
 
                     onEvent.accept(new AgentEvent("reasoning", "analyzer", "completed",
                             "Analysis complete", summary));
@@ -249,20 +256,37 @@ public class MultiAgentOrchestrator {
 
             log.info("Collected evidence from {} agents", evidence.size());
 
-            // RCA FLOW: Full reasoning + recommendation pipeline
-            // Phase 3: Reasoning - correlate evidence and generate hypotheses
-            onEvent.accept(new AgentEvent("reasoning", "reasoning", "started", "Correlating evidence and generating hypotheses", null));
-            String hypothesesJson = reasoningAgent.correlate(evidence);
-            onEvent.accept(new AgentEvent("reasoning", "reasoning", "completed", "Hypotheses generated", hypothesesJson));
+            // RCA FLOW: Combined reasoning + recommendation + actions in ONE call
+            onEvent.accept(new AgentEvent("reasoning", "reasoning", "started", "Analyzing evidence and generating recommendations", null));
 
-            // Phase 4: Recommendations - produce actionable recommendations
-            onEvent.accept(new AgentEvent("recommending", "recommendation", "started", "Generating actionable recommendations", null));
-            String recommendationsJson = recommendationAgent.recommend(hypothesesJson);
-            onEvent.accept(new AgentEvent("recommending", "recommendation", "completed", "Recommendations generated", recommendationsJson));
+            String evidenceText = evidence.entrySet().stream()
+                    .map(e -> "=== " + e.getKey().toUpperCase() + " ===\n" + e.getValue())
+                    .collect(Collectors.joining("\n\n"));
 
-            // Phase 5: Complete — include evidence as proof alongside recommendations
-            List<Map<String, String>> rcaActions = generateLlmRcaSuggestedActions(question, recommendationsJson, hypothesesJson);
-            String finalResult = buildRcaResponse(evidence, recommendationsJson, rcaActions);
+            String rcaPrompt = "You are a contact center RCA analyst. The user asked: \"" + question + "\"\n\n" +
+                    "Below is evidence gathered from multiple investigation agents:\n\n" + evidenceText + "\n\n" +
+                    "Provide a comprehensive root cause analysis. Format your response as JSON:\n" +
+                    "{\n" +
+                    "  \"summary\": \"One sentence root cause summary\",\n" +
+                    "  \"recommendations\": [\n" +
+                    "    {\"action\": \"what to do\", \"rationale\": \"why\", \"urgency\": \"critical|high|medium\", \"expectedImpact\": \"result\"}\n" +
+                    "  ],\n" +
+                    "  \"suggestedActions\": [\n" +
+                    "    {\"label\": \"short button text\", \"query\": \"follow-up question to ask\"}\n" +
+                    "  ]\n" +
+                    "}\n\n" +
+                    "Rules:\n" +
+                    "- summary: one clear sentence about the root cause\n" +
+                    "- recommendations: 2-4 actionable items sorted by urgency\n" +
+                    "- suggestedActions: 3-4 follow-up queries for evidence/verification\n" +
+                    "- Be specific with numbers from the evidence\n" +
+                    "- Return ONLY valid JSON, no code fences";
+
+            String rcaResponse = callBedrockForAnalysis(rcaPrompt);
+            onEvent.accept(new AgentEvent("reasoning", "reasoning", "completed", "Analysis complete", null));
+
+            // Build final response
+            String finalResult = buildRcaResponseFromCombined(evidence, rcaResponse);
             onEvent.accept(new AgentEvent("complete", "orchestrator", "completed", "Investigation complete", finalResult));
 
             return finalResult;
@@ -399,9 +423,10 @@ public class MultiAgentOrchestrator {
             response.put("type", "rca_result");
             response.put("evidence", evidence);
             try {
-                response.put("analysis", mapper.readTree(recommendationsJson));
+                String cleaned = stripCodeFences(recommendationsJson);
+                response.put("analysis", mapper.readTree(cleaned));
             } catch (Exception e) {
-                response.put("analysis", recommendationsJson);
+                response.put("analysis", Map.of("summary", recommendationsJson));
             }
             if (suggestedActions != null && !suggestedActions.isEmpty()) {
                 response.put("suggestedActions", suggestedActions);
@@ -412,6 +437,55 @@ public class MultiAgentOrchestrator {
         }
     }
 
+
+    private boolean isObviousDataQuery(String question) {
+        String q = question.toLowerCase().trim();
+        // Data query patterns: show, list, get, give, which, what, how many, top, compare
+        if (q.matches("^(show|list|get|give|display|find|fetch|tell|count|check)\\b.*")) return true;
+        if (q.matches("^(which|what|how many|how much|top \\d|compare|who)\\b.*")) return true;
+        if (q.matches(".*\\b(by skill|by agent|by team|by channel|per agent|per skill|this week|today|yesterday|last \\d)\\b.*")) return true;
+        if (q.matches(".*\\b(aht|handle time|contacts|volume|sla|abandonment|staffing|login|session)\\b.*")
+                && !q.matches(".*\\b(why is|what caused|investigate|root cause)\\b.*")) return true;
+        // Follow-up/recommendation patterns — treat as data query
+        if (q.matches(".*\\b(recommend|suggestion|improve|fix|action|what should|how to fix|how can we)\\b.*")) return true;
+        // RCA patterns that should NOT fast-path
+        if (q.matches(".*\\b(why is .* (increasing|decreasing|spiking|dropping|failing))\\b.*")) return false;
+        if (q.matches(".*\\b(root cause|investigate|what caused the)\\b.*")) return false;
+        // Default: if it contains "why" with a systemic term, it's RCA
+        if (q.startsWith("why") && q.matches(".*\\b(queue|sla|abandon|service level)\\b.*")) return false;
+        // Default to data query
+        return true;
+    }
+
+    private String buildRcaResponseFromCombined(Map<String, String> evidence, String rcaResponse) {
+        try {
+            String cleaned = stripCodeFences(rcaResponse);
+            JsonNode root = mapper.readTree(cleaned);
+
+            Map<String, Object> response = new LinkedHashMap<>();
+            response.put("type", "rca_result");
+            response.put("evidence", evidence);
+            response.put("analysis", Map.of(
+                    "summary", root.has("summary") ? root.get("summary").asText() : "Analysis complete",
+                    "recommendations", root.has("recommendations") ? mapper.readTree(root.get("recommendations").toString()) : List.of()
+            ));
+            if (root.has("suggestedActions")) {
+                response.put("suggestedActions", mapper.readTree(root.get("suggestedActions").toString()));
+            }
+            return mapper.writeValueAsString(response);
+        } catch (Exception e) {
+            log.warn("Failed to parse combined RCA response, wrapping as summary: {}", e.getMessage());
+            try {
+                Map<String, Object> response = new LinkedHashMap<>();
+                response.put("type", "rca_result");
+                response.put("evidence", evidence);
+                response.put("analysis", Map.of("summary", rcaResponse));
+                return mapper.writeValueAsString(response);
+            } catch (JsonProcessingException ex) {
+                return rcaResponse;
+            }
+        }
+    }
 
     private Plan parsePlan(String planJson) {
         try {

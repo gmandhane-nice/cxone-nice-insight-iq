@@ -3,24 +3,26 @@ package com.nice.agentic;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
-/**
- * Holds the active tenant ID for the current deployment.
- *
- * In production this would come from the supervisor's JWT/session.
- * For Sparkathon demo, it's configured via {@code agentic.tenant-id} property.
- *
- * Dev tenant: {@code 11efd95f-eed7-42e0-a6c9-0242ac110002} (16K+ contacts in Snowflake dev).
- */
 @Component
 public class TenantContext {
 
-    private final String tenantId;
+    private volatile String tenantId;
+    private final String defaultTenantId;
 
-    public TenantContext(@Value("${agentic.tenant-id:11efd95f-eed7-42e0-a6c9-0242ac110002}") String tenantId) {
+    public TenantContext(@Value("${agentic.tenant-id:11eb0fd4-c54b-6c70-a061-0242ac110003}") String tenantId) {
         this.tenantId = tenantId;
+        this.defaultTenantId = tenantId;
     }
 
     public String getTenantId() {
         return tenantId;
+    }
+
+    public void setTenantId(String tenantId) {
+        this.tenantId = tenantId;
+    }
+
+    public String getDefaultTenantId() {
+        return defaultTenantId;
     }
 }
