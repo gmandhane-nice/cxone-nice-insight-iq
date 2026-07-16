@@ -1,7 +1,10 @@
 package com.nice.agentic.simulator;
 
 import com.nice.agentic.TenantContext;
+import com.nice.agentic.config.ModuleMetrics;
 import com.nice.agentic.query.SnowflakeExecutor;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.*;
@@ -11,16 +14,20 @@ import java.util.*;
 
 @RestController
 @RequestMapping("/simulator")
+@Tag(name = "Simulator")
 public class StaffingSimulatorController {
 
     private static final Logger log = LoggerFactory.getLogger(StaffingSimulatorController.class);
 
     private final SnowflakeExecutor snowflakeExecutor;
     private final TenantContext tenantContext;
+    private final ModuleMetrics moduleMetrics;
 
-    public StaffingSimulatorController(SnowflakeExecutor snowflakeExecutor, TenantContext tenantContext) {
+    public StaffingSimulatorController(SnowflakeExecutor snowflakeExecutor, TenantContext tenantContext,
+                                       ModuleMetrics moduleMetrics) {
         this.snowflakeExecutor = snowflakeExecutor;
         this.tenantContext = tenantContext;
+        this.moduleMetrics = moduleMetrics;
     }
 
     // -------------------------------------------------------------------------
@@ -28,62 +35,71 @@ public class StaffingSimulatorController {
     // -------------------------------------------------------------------------
 
     @GetMapping("/current-state")
+    @Operation(
+            summary = "Get current staffing state",
+            description = "Returns the current staffing state across all skills including contacts per hour, "
+                    + "average handle time, active agent count, current SLA, and traffic intensity using Erlang-C modeling.")
     public Map<String, Object> currentState() {
-        log.info("Fetching current staffing state for tenant {}", tenantContext.getTenantId());
-
-        if (!snowflakeExecutor.isConfigured()) {
-            log.warn("Snowflake not configured — returning mock staffing state");
-            return buildMockCurrentState();
-        }
-
+        long start = System.currentTimeMillis();
         try {
-            String tenantId = tenantContext.getTenantId();
+            log.info("Fetching current staffing state for tenant {}", tenantContext.getTenantId());
 
-            // Query last 7 days: contacts per day, avg AHT, distinct agents per skill
-            String sql = "SELECT s.SKILL_NAME, a.SKILL_NO, " +
-                    "COUNT(*) / 7.0 / 24.0 AS CONTACTS_PER_HOUR, " +
-                    "AVG(a.HANDLE_SECONDS) AS AVG_AHT, " +
-                    "COUNT(DISTINCT a.USER_ID) AS CURRENT_AGENTS " +
-                    "FROM " + SnowflakeExecutor.VIEW_AGENT_CONTACT_FACT + " a " +
-                    "JOIN (SELECT SKILL_NO, MAX(SKILL_NAME) AS SKILL_NAME " +
-                    "      FROM " + SnowflakeExecutor.VIEW_SKILL_DIM +
-                    "      WHERE _TENANT_ID = '" + tenantId + "' " +
-                    "      GROUP BY SKILL_NO) s ON a.SKILL_NO = s.SKILL_NO " +
-                    "WHERE a._TENANT_ID = '" + tenantId + "' " +
-                    "AND a.START_TIMESTAMP >= DATEADD(day, -7, CURRENT_TIMESTAMP()) " +
-                    "GROUP BY s.SKILL_NAME, a.SKILL_NO " +
-                    "ORDER BY CONTACTS_PER_HOUR DESC";
-
-            List<Map<String, Object>> rows = snowflakeExecutor.execute(sql);
-
-            List<Map<String, Object>> skills = new ArrayList<>();
-            for (Map<String, Object> row : rows) {
-                double contactsPerHour = toDouble(row.get("CONTACTS_PER_HOUR"));
-                double avgAht = toDouble(row.get("AVG_AHT"));
-                int currentAgents = toInt(row.get("CURRENT_AGENTS"));
-                double trafficIntensity = contactsPerHour * (avgAht / 3600.0);
-                double currentSla = predictSla(currentAgents, contactsPerHour, avgAht, 30.0);
-
-                Map<String, Object> skill = new LinkedHashMap<>();
-                skill.put("skillName", row.get("SKILL_NAME"));
-                skill.put("skillNo", toInt(row.get("SKILL_NO")));
-                skill.put("contactsPerHour", Math.round(contactsPerHour * 100.0) / 100.0);
-                skill.put("avgAht", Math.round(avgAht * 10.0) / 10.0);
-                skill.put("currentAgents", currentAgents);
-                skill.put("currentSla", Math.round(currentSla * 100.0) / 100.0);
-                skill.put("trafficIntensity", Math.round(trafficIntensity * 100.0) / 100.0);
-                skills.add(skill);
+            if (!snowflakeExecutor.isConfigured()) {
+                log.warn("Snowflake not configured — returning mock staffing state");
+                return buildMockCurrentState();
             }
 
-            Map<String, Object> response = new LinkedHashMap<>();
-            response.put("generatedAt", Instant.now().toString());
-            response.put("skills", skills);
-            log.info("Returned staffing state for {} skills", skills.size());
-            return response;
+            try {
+                String tenantId = tenantContext.getTenantId();
 
-        } catch (Exception e) {
-            log.error("Failed to fetch current staffing state: {}", e.getMessage(), e);
-            return buildMockCurrentState();
+                // Query last 7 days: contacts per day, avg AHT, distinct agents per skill
+                String sql = "SELECT s.SKILL_NAME, a.SKILL_NO, " +
+                        "COUNT(*) / 7.0 / 24.0 AS CONTACTS_PER_HOUR, " +
+                        "AVG(a.HANDLE_SECONDS) AS AVG_AHT, " +
+                        "COUNT(DISTINCT a.USER_ID) AS CURRENT_AGENTS " +
+                        "FROM " + SnowflakeExecutor.VIEW_AGENT_CONTACT_FACT + " a " +
+                        "JOIN (SELECT SKILL_NO, MAX(SKILL_NAME) AS SKILL_NAME " +
+                        "      FROM " + SnowflakeExecutor.VIEW_SKILL_DIM +
+                        "      WHERE _TENANT_ID = '" + tenantId + "' " +
+                        "      GROUP BY SKILL_NO) s ON a.SKILL_NO = s.SKILL_NO " +
+                        "WHERE a._TENANT_ID = '" + tenantId + "' " +
+                        "AND a.START_TIMESTAMP >= DATEADD(day, -7, CURRENT_TIMESTAMP()) " +
+                        "GROUP BY s.SKILL_NAME, a.SKILL_NO " +
+                        "ORDER BY CONTACTS_PER_HOUR DESC";
+
+                List<Map<String, Object>> rows = snowflakeExecutor.execute(sql);
+
+                List<Map<String, Object>> skills = new ArrayList<>();
+                for (Map<String, Object> row : rows) {
+                    double contactsPerHour = toDouble(row.get("CONTACTS_PER_HOUR"));
+                    double avgAht = toDouble(row.get("AVG_AHT"));
+                    int currentAgents = toInt(row.get("CURRENT_AGENTS"));
+                    double trafficIntensity = contactsPerHour * (avgAht / 3600.0);
+                    double currentSla = predictSla(currentAgents, contactsPerHour, avgAht, 30.0);
+
+                    Map<String, Object> skill = new LinkedHashMap<>();
+                    skill.put("skillName", row.get("SKILL_NAME"));
+                    skill.put("skillNo", toInt(row.get("SKILL_NO")));
+                    skill.put("contactsPerHour", Math.round(contactsPerHour * 100.0) / 100.0);
+                    skill.put("avgAht", Math.round(avgAht * 10.0) / 10.0);
+                    skill.put("currentAgents", currentAgents);
+                    skill.put("currentSla", Math.round(currentSla * 100.0) / 100.0);
+                    skill.put("trafficIntensity", Math.round(trafficIntensity * 100.0) / 100.0);
+                    skills.add(skill);
+                }
+
+                Map<String, Object> response = new LinkedHashMap<>();
+                response.put("generatedAt", Instant.now().toString());
+                response.put("skills", skills);
+                log.info("Returned staffing state for {} skills", skills.size());
+                return response;
+
+            } catch (Exception e) {
+                log.error("Failed to fetch current staffing state: {}", e.getMessage(), e);
+                return buildMockCurrentState();
+            }
+        } finally {
+            moduleMetrics.record("simulator", System.currentTimeMillis() - start);
         }
     }
 
@@ -92,6 +108,11 @@ public class StaffingSimulatorController {
     // -------------------------------------------------------------------------
 
     @PostMapping("/simulate")
+    @Operation(
+            summary = "Run staffing simulation",
+            description = "Simulates the SLA impact of moving agents between skills using Erlang-C queuing theory. "
+                    + "Accepts agent delta changes per skill and returns before/after SLA predictions, "
+                    + "wait probabilities, and a safety recommendation.")
     public Map<String, Object> simulate(@RequestBody SimulateRequest request) {
         log.info("Running staffing simulation with {} changes, targetAnswerTime={}s",
                 request.changes != null ? request.changes.size() : 0, request.targetAnswerTime);

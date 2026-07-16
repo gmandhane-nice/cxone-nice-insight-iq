@@ -1,9 +1,14 @@
 package com.nice.agentic.forecast;
 
 import com.nice.agentic.TenantContext;
+import com.nice.agentic.config.AnalyticsConfig;
+import com.nice.agentic.config.ModuleMetrics;
 import com.nice.agentic.query.SnowflakeExecutor;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -29,21 +34,29 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/forecast")
+@Tag(name = "Forecast")
 public class DemandForecastController {
 
     private static final Logger log = LoggerFactory.getLogger(DemandForecastController.class);
 
-    private static final int CONTACTS_PER_AGENT_PER_HOUR = 8;
-    private static final int FORECAST_HOURS = 4;
-    private static final int HISTORY_DAYS = 28;
-
     private final SnowflakeExecutor snowflakeExecutor;
     private final TenantContext tenantContext;
+    private final ModuleMetrics moduleMetrics;
+    private final AnalyticsConfig.Forecast forecastConfig;
 
     public DemandForecastController(SnowflakeExecutor snowflakeExecutor,
-                                    TenantContext tenantContext) {
+                                    TenantContext tenantContext,
+                                    ModuleMetrics moduleMetrics,
+                                    AnalyticsConfig analyticsConfig) {
         this.snowflakeExecutor = snowflakeExecutor;
         this.tenantContext = tenantContext;
+        this.moduleMetrics = moduleMetrics;
+        this.forecastConfig = analyticsConfig.getForecast();
+    }
+
+    // Expose tenantContext for cache key SpEL expression
+    public TenantContext getTenantContext() {
+        return tenantContext;
     }
 
     // -------------------------------------------------------------------------
@@ -51,17 +64,28 @@ public class DemandForecastController {
     // -------------------------------------------------------------------------
 
     @GetMapping("/demand")
+    @Cacheable(value = "demandForecast", key = "#root.target.tenantContext.tenantId")
+    @Operation(
+            summary = "Get demand forecast for next 4 hours",
+            description = "Analyzes historical contact volume patterns (hour-of-day, day-of-week) from the last 4 weeks "
+                    + "and forecasts contact volume for the next 4 hours. Returns predicted volumes, staffing sufficiency, "
+                    + "surge alerts, and actionable insights for proactive agent positioning.")
     public Map<String, Object> demand() {
-        if (!snowflakeExecutor.isConfigured()) {
-            log.info("Snowflake not configured — returning mock forecast data");
-            return buildMockResponse();
-        }
-
+        long start = System.currentTimeMillis();
         try {
-            return buildLiveForecast();
-        } catch (Exception e) {
-            log.error("Failed to build live forecast — returning mock data: {}", e.getMessage(), e);
-            return buildMockResponse();
+            if (!snowflakeExecutor.isConfigured()) {
+                log.info("Snowflake not configured — returning mock forecast data");
+                return buildMockResponse();
+            }
+
+            try {
+                return buildLiveForecast();
+            } catch (Exception e) {
+                log.error("Failed to build live forecast — returning mock data: {}", e.getMessage(), e);
+                return buildMockResponse();
+            }
+        } finally {
+            moduleMetrics.record("forecast", System.currentTimeMillis() - start);
         }
     }
 
@@ -112,7 +136,7 @@ public class DemandForecastController {
         int peakHour = currentHour;
         int peakVolume = predictedCurrent;
 
-        for (int i = 1; i <= FORECAST_HOURS; i++) {
+        for (int i = 1; i <= forecastConfig.getForecastHours(); i++) {
             ZonedDateTime futureTime = now.plusHours(i);
             int fHour = futureTime.getHour();
             int fDow = futureTime.getDayOfWeek().getValue();
@@ -123,7 +147,7 @@ public class DemandForecastController {
             int histAvg = predicted;
 
             // Staffing sufficiency
-            int agentsRecommended = (int) Math.ceil((double) predicted / CONTACTS_PER_AGENT_PER_HOUR);
+            int agentsRecommended = (int) Math.ceil((double) predicted / forecastConfig.getContactsPerAgentPerHour());
             String sufficiency = calculateStaffingSufficiency(activeAgents, predicted);
             boolean surgeAlert = predicted > overallAvg * 1.15;
 
@@ -173,7 +197,7 @@ public class DemandForecastController {
                 + "         COUNT(*) AS DAILY_HOURLY_COUNT\n"
                 + "  FROM " + SnowflakeExecutor.VIEW_AGENT_CONTACT_FACT + " a\n"
                 + "  WHERE a._TENANT_ID = '" + tenantId + "'\n"
-                + "    AND a.START_TIMESTAMP >= DATEADD(day, -" + HISTORY_DAYS + ", CURRENT_TIMESTAMP())\n"
+                + "    AND a.START_TIMESTAMP >= DATEADD(day, -" + forecastConfig.getHistoryDays() + ", CURRENT_TIMESTAMP())\n"
                 + "  GROUP BY DATE_TRUNC('day', a.START_TIMESTAMP), DAYOFWEEK(a.START_TIMESTAMP), HOUR(a.START_TIMESTAMP)\n"
                 + ") sub\n"
                 + "GROUP BY DOW, HOUR_OF_DAY\n"
@@ -213,7 +237,7 @@ public class DemandForecastController {
     // -------------------------------------------------------------------------
 
     private String calculateStaffingSufficiency(int activeAgents, int predictedVolume) {
-        double requiredAgents = (double) predictedVolume / CONTACTS_PER_AGENT_PER_HOUR;
+        double requiredAgents = (double) predictedVolume / forecastConfig.getContactsPerAgentPerHour();
         if (activeAgents > requiredAgents) {
             return "overstaffed";
         } else if (activeAgents >= requiredAgents * 0.9) {
@@ -289,7 +313,7 @@ public class DemandForecastController {
         String[] sufficiency = {"understaffed", "critical", "understaffed", "adequate"};
         boolean[] surges = {true, true, true, false};
 
-        for (int i = 0; i < FORECAST_HOURS; i++) {
+        for (int i = 0; i < forecastConfig.getForecastHours(); i++) {
             ZonedDateTime futureTime = now.plusHours(i + 1);
             int fHour = futureTime.getHour();
             String dayName = futureTime.getDayOfWeek().getDisplayName(TextStyle.FULL, Locale.ENGLISH).toUpperCase();
@@ -301,7 +325,7 @@ public class DemandForecastController {
             entry.put("historicalAvg", mockHistAvg[i]);
             entry.put("historicalMax", mockHistMax[i]);
             entry.put("staffingSufficiency", sufficiency[i]);
-            entry.put("agentsRecommended", (int) Math.ceil((double) mockPredicted[i] / CONTACTS_PER_AGENT_PER_HOUR));
+            entry.put("agentsRecommended", (int) Math.ceil((double) mockPredicted[i] / forecastConfig.getContactsPerAgentPerHour()));
             entry.put("surgeAlert", surges[i]);
             forecast.add(entry);
         }

@@ -1,7 +1,10 @@
 package com.nice.agentic.risk;
 
 import com.nice.agentic.TenantContext;
+import com.nice.agentic.config.ModuleMetrics;
 import com.nice.agentic.query.SnowflakeExecutor;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -23,123 +26,137 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 @RestController
 @RequestMapping("/risk/overflow")
+@Tag(name = "Overflow")
 public class SmartOverflowController {
 
     private static final Logger log = LoggerFactory.getLogger(SmartOverflowController.class);
 
     private final SnowflakeExecutor snowflakeExecutor;
     private final TenantContext tenantContext;
+    private final ModuleMetrics moduleMetrics;
 
-    public SmartOverflowController(SnowflakeExecutor snowflakeExecutor, TenantContext tenantContext) {
+    public SmartOverflowController(SnowflakeExecutor snowflakeExecutor, TenantContext tenantContext,
+                                   ModuleMetrics moduleMetrics) {
         this.snowflakeExecutor = snowflakeExecutor;
         this.tenantContext = tenantContext;
+        this.moduleMetrics = moduleMetrics;
     }
 
     @GetMapping("/recommendations")
+    @Operation(
+            summary = "Get smart overflow recommendations",
+            description = "Identifies the longest and most at-risk queues by queue depth and increasing trend, "
+                    + "then finds agents who are proficient in those skills but currently assigned elsewhere. "
+                    + "Returns reassignment recommendations with predicted queue reduction percentages.")
     public Map<String, Object> getRecommendations() {
-        if (!snowflakeExecutor.isConfigured()) {
-            return buildMockResponse();
-        }
-
+        long start = System.currentTimeMillis();
         try {
-            String tenantId = tenantContext.getTenantId();
+            if (!snowflakeExecutor.isConfigured()) {
+                return buildMockResponse();
+            }
 
-            // Step 1: Find skills with longest/growing queues (at-risk)
-            List<Map<String, Object>> atRiskSkills = queryAtRiskSkills(tenantId);
-            if (atRiskSkills.isEmpty()) {
+            try {
+                String tenantId = tenantContext.getTenantId();
+
+                // Step 1: Find skills with longest/growing queues (at-risk)
+                List<Map<String, Object>> atRiskSkills = queryAtRiskSkills(tenantId);
+                if (atRiskSkills.isEmpty()) {
+                    return Map.of(
+                            "generatedAt", DateTimeFormatter.ISO_INSTANT.format(Instant.now()),
+                            "recommendations", List.of(),
+                            "message", "No at-risk queues detected — all skills are healthy.");
+                }
+
+                // Step 2: For top 5 at-risk skills, find proficient agents in parallel
+                List<Map<String, Object>> topSkills = atRiskSkills.subList(0, Math.min(5, atRiskSkills.size()));
+
+                Map<Integer, List<Map<String, Object>>> proficientBySkill = new ConcurrentHashMap<>();
+                List<CompletableFuture<Void>> futures = new ArrayList<>();
+                for (Map<String, Object> skill : topSkills) {
+                    int skillNo = toInt(skill.get("SKILL_NO"));
+                    double teamAvgAht = toDouble(skill.get("TEAM_AVG_AHT"), 0);
+                    final String tid = tenantId;
+                    futures.add(CompletableFuture.runAsync(() -> {
+                        try {
+                            List<Map<String, Object>> agents = queryProficientAgents(tid, skillNo, teamAvgAht);
+                            proficientBySkill.put(skillNo, agents);
+                        } catch (Exception e) {
+                            log.warn("Failed to query proficient agents for skill {}: {}", skillNo, e.getMessage());
+                            proficientBySkill.put(skillNo, List.of());
+                        }
+                    }));
+                }
+                CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+
+                List<Map<String, Object>> recommendations = new ArrayList<>();
+                for (Map<String, Object> skill : topSkills) {
+                    String skillName = skill.get("SKILL_NAME").toString();
+                    int skillNo = toInt(skill.get("SKILL_NO"));
+                    int queueDepth = toInt(skill.get("QUEUE_DEPTH"));
+                    double currentAht = toDouble(skill.get("CURRENT_AVG_AHT"), 0);
+                    double teamAvgAht = toDouble(skill.get("TEAM_AVG_AHT"), 0);
+                    int activeAgents = toInt(skill.get("ACTIVE_AGENTS"));
+                    double trendPct = toDouble(skill.get("TREND_PCT"), 0);
+
+                    List<Map<String, Object>> proficientAgents = proficientBySkill.getOrDefault(skillNo, List.of());
+
+                    if (!proficientAgents.isEmpty()) {
+                        int agentsNeeded = Math.max(1, (int) Math.ceil(queueDepth / 5.0));
+                        int agentsToAssign = Math.min(agentsNeeded, proficientAgents.size());
+
+                        List<Map<String, Object>> candidateAgents = new ArrayList<>();
+                        for (int i = 0; i < agentsToAssign; i++) {
+                            Map<String, Object> agent = proficientAgents.get(i);
+                            Map<String, Object> candidate = new LinkedHashMap<>();
+                            candidate.put("agentName", agent.get("USER_FIRST_NAME") + " " + agent.get("USER_LAST_NAME"));
+                            candidate.put("agentAht", toDouble(agent.get("AGENT_AHT"), 0));
+                            candidate.put("teamAvgAht", teamAvgAht);
+                            candidate.put("gapRatio", toDouble(agent.get("GAP_RATIO"), 0));
+                            candidate.put("contactsHandled", toInt(agent.get("CONTACT_COUNT")));
+                            candidate.put("currentSkill", agent.get("PRIMARY_SKILL") != null ? agent.get("PRIMARY_SKILL").toString() : "Multiple");
+                            candidateAgents.add(candidate);
+                        }
+
+                        double predictedReduction = Math.min(80, agentsToAssign * 15.0);
+
+                        Map<String, Object> rec = new LinkedHashMap<>();
+                        rec.put("skillName", skillName);
+                        rec.put("skillNo", skillNo);
+                        rec.put("severity", queueDepth > 20 ? "critical" : (queueDepth > 10 ? "high" : "medium"));
+                        rec.put("queueDepth", queueDepth);
+                        rec.put("activeAgents", activeAgents);
+                        rec.put("trendPct", Math.round(trendPct * 10.0) / 10.0);
+                        rec.put("trendDirection", trendPct > 0 ? "increasing" : "stable");
+                        rec.put("currentAvgAht", Math.round(currentAht * 10.0) / 10.0);
+                        rec.put("teamAvgAht", Math.round(teamAvgAht * 10.0) / 10.0);
+                        rec.put("agentsNeeded", agentsNeeded);
+                        rec.put("candidateAgents", candidateAgents);
+                        rec.put("predictedQueueReduction", predictedReduction + "%");
+                        rec.put("action", "Assign " + agentsToAssign + " proficient agent(s) to " + skillName);
+                        rec.put("rationale", "These agents have completed coaching for " + skillName
+                                + " (AHT at or below team average). Reassigning them will reduce queue depth by ~"
+                                + (int) predictedReduction + "%.");
+                        recommendations.add(rec);
+                    }
+                }
+
+                Map<String, Object> response = new LinkedHashMap<>();
+                response.put("generatedAt", DateTimeFormatter.ISO_INSTANT.format(Instant.now()));
+                response.put("recommendations", recommendations);
+                response.put("totalAtRiskSkills", atRiskSkills.size());
+                response.put("totalCandidateAgents", recommendations.stream()
+                        .mapToInt(r -> ((List<?>) r.get("candidateAgents")).size()).sum());
+                return response;
+
+            } catch (Exception e) {
+                log.error("Smart overflow recommendation failed: {}", e.getMessage(), e);
                 return Map.of(
                         "generatedAt", DateTimeFormatter.ISO_INSTANT.format(Instant.now()),
                         "recommendations", List.of(),
-                        "message", "No at-risk queues detected — all skills are healthy.");
+                        "error", e.getMessage());
             }
-
-            // Step 2: For top 5 at-risk skills, find proficient agents in parallel
-            List<Map<String, Object>> topSkills = atRiskSkills.subList(0, Math.min(5, atRiskSkills.size()));
-
-            Map<Integer, List<Map<String, Object>>> proficientBySkill = new ConcurrentHashMap<>();
-            List<CompletableFuture<Void>> futures = new ArrayList<>();
-            for (Map<String, Object> skill : topSkills) {
-                int skillNo = toInt(skill.get("SKILL_NO"));
-                double teamAvgAht = toDouble(skill.get("TEAM_AVG_AHT"), 0);
-                final String tid = tenantId;
-                futures.add(CompletableFuture.runAsync(() -> {
-                    try {
-                        List<Map<String, Object>> agents = queryProficientAgents(tid, skillNo, teamAvgAht);
-                        proficientBySkill.put(skillNo, agents);
-                    } catch (Exception e) {
-                        log.warn("Failed to query proficient agents for skill {}: {}", skillNo, e.getMessage());
-                        proficientBySkill.put(skillNo, List.of());
-                    }
-                }));
-            }
-            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-
-            List<Map<String, Object>> recommendations = new ArrayList<>();
-            for (Map<String, Object> skill : topSkills) {
-                String skillName = skill.get("SKILL_NAME").toString();
-                int skillNo = toInt(skill.get("SKILL_NO"));
-                int queueDepth = toInt(skill.get("QUEUE_DEPTH"));
-                double currentAht = toDouble(skill.get("CURRENT_AVG_AHT"), 0);
-                double teamAvgAht = toDouble(skill.get("TEAM_AVG_AHT"), 0);
-                int activeAgents = toInt(skill.get("ACTIVE_AGENTS"));
-                double trendPct = toDouble(skill.get("TREND_PCT"), 0);
-
-                List<Map<String, Object>> proficientAgents = proficientBySkill.getOrDefault(skillNo, List.of());
-
-                if (!proficientAgents.isEmpty()) {
-                    int agentsNeeded = Math.max(1, (int) Math.ceil(queueDepth / 5.0));
-                    int agentsToAssign = Math.min(agentsNeeded, proficientAgents.size());
-
-                    List<Map<String, Object>> candidateAgents = new ArrayList<>();
-                    for (int i = 0; i < agentsToAssign; i++) {
-                        Map<String, Object> agent = proficientAgents.get(i);
-                        Map<String, Object> candidate = new LinkedHashMap<>();
-                        candidate.put("agentName", agent.get("USER_FIRST_NAME") + " " + agent.get("USER_LAST_NAME"));
-                        candidate.put("agentAht", toDouble(agent.get("AGENT_AHT"), 0));
-                        candidate.put("teamAvgAht", teamAvgAht);
-                        candidate.put("gapRatio", toDouble(agent.get("GAP_RATIO"), 0));
-                        candidate.put("contactsHandled", toInt(agent.get("CONTACT_COUNT")));
-                        candidate.put("currentSkill", agent.get("PRIMARY_SKILL") != null ? agent.get("PRIMARY_SKILL").toString() : "Multiple");
-                        candidateAgents.add(candidate);
-                    }
-
-                    double predictedReduction = Math.min(80, agentsToAssign * 15.0);
-
-                    Map<String, Object> rec = new LinkedHashMap<>();
-                    rec.put("skillName", skillName);
-                    rec.put("skillNo", skillNo);
-                    rec.put("severity", queueDepth > 20 ? "critical" : (queueDepth > 10 ? "high" : "medium"));
-                    rec.put("queueDepth", queueDepth);
-                    rec.put("activeAgents", activeAgents);
-                    rec.put("trendPct", Math.round(trendPct * 10.0) / 10.0);
-                    rec.put("trendDirection", trendPct > 0 ? "increasing" : "stable");
-                    rec.put("currentAvgAht", Math.round(currentAht * 10.0) / 10.0);
-                    rec.put("teamAvgAht", Math.round(teamAvgAht * 10.0) / 10.0);
-                    rec.put("agentsNeeded", agentsNeeded);
-                    rec.put("candidateAgents", candidateAgents);
-                    rec.put("predictedQueueReduction", predictedReduction + "%");
-                    rec.put("action", "Assign " + agentsToAssign + " proficient agent(s) to " + skillName);
-                    rec.put("rationale", "These agents have completed coaching for " + skillName
-                            + " (AHT at or below team average). Reassigning them will reduce queue depth by ~"
-                            + (int) predictedReduction + "%.");
-                    recommendations.add(rec);
-                }
-            }
-
-            Map<String, Object> response = new LinkedHashMap<>();
-            response.put("generatedAt", DateTimeFormatter.ISO_INSTANT.format(Instant.now()));
-            response.put("recommendations", recommendations);
-            response.put("totalAtRiskSkills", atRiskSkills.size());
-            response.put("totalCandidateAgents", recommendations.stream()
-                    .mapToInt(r -> ((List<?>) r.get("candidateAgents")).size()).sum());
-            return response;
-
-        } catch (Exception e) {
-            log.error("Smart overflow recommendation failed: {}", e.getMessage(), e);
-            return Map.of(
-                    "generatedAt", DateTimeFormatter.ISO_INSTANT.format(Instant.now()),
-                    "recommendations", List.of(),
-                    "error", e.getMessage());
+        } finally {
+            moduleMetrics.record("overflow", System.currentTimeMillis() - start);
         }
     }
 

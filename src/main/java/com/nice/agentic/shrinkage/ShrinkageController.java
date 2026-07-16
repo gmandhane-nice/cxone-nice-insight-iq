@@ -1,9 +1,14 @@
 package com.nice.agentic.shrinkage;
 
 import com.nice.agentic.TenantContext;
+import com.nice.agentic.config.AnalyticsConfig;
+import com.nice.agentic.config.ModuleMetrics;
 import com.nice.agentic.query.SnowflakeExecutor;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -26,35 +31,24 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/shrinkage")
+@Tag(name = "Shrinkage")
 public class ShrinkageController {
 
     private static final Logger log = LoggerFactory.getLogger(ShrinkageController.class);
 
-    /** Assumed shift duration: 8 hours = 28800 seconds. */
-    private static final int SHIFT_SECONDS = 28800;
-
-    /** Loaded agent cost per hour in dollars. */
-    private static final double COST_PER_HOUR = 25.0;
-
-    /** Normal shrinkage rate (breaks, training, meetings). */
-    private static final double NORMAL_SHRINKAGE = 0.30;
-
-    /** Threshold above which shrinkage is considered elevated. */
-    private static final double ELEVATED_THRESHOLD = 0.35;
-
-    /** Threshold above which shrinkage is considered excessive. */
-    private static final double EXCESSIVE_THRESHOLD = 0.45;
-
-    /** Factor above team average ACW that triggers an "Extended ACW" flag. */
-    private static final double ACW_FLAG_FACTOR = 1.5;
-
     private final SnowflakeExecutor snowflakeExecutor;
     private final TenantContext tenantContext;
+    private final AnalyticsConfig.Shrinkage shrinkageConfig;
+    private final ModuleMetrics moduleMetrics;
 
     public ShrinkageController(SnowflakeExecutor snowflakeExecutor,
-                               TenantContext tenantContext) {
+                               TenantContext tenantContext,
+                               AnalyticsConfig analyticsConfig,
+                               ModuleMetrics moduleMetrics) {
         this.snowflakeExecutor = snowflakeExecutor;
         this.tenantContext = tenantContext;
+        this.shrinkageConfig = analyticsConfig.getShrinkage();
+        this.moduleMetrics = moduleMetrics;
     }
 
     // -------------------------------------------------------------------------
@@ -62,18 +56,34 @@ public class ShrinkageController {
     // -------------------------------------------------------------------------
 
     @GetMapping("/analysis")
+    @Cacheable(value = "shrinkageAnalysis", key = "#root.target.tenantContext.tenantId")
+    @Operation(
+            summary = "Get shrinkage and idle time analysis",
+            description = "Tracks productive vs. non-productive time per agent and team, quantifying revenue leakage "
+                    + "from idle time, extended breaks, and long after-call work. Returns agents exceeding normal "
+                    + "shrinkage thresholds with estimated cost impact of excess idle time.")
     public Map<String, Object> analysis() {
-        if (!snowflakeExecutor.isConfigured()) {
-            log.info("Snowflake not configured — returning mock shrinkage data");
-            return buildMockResponse();
-        }
-
+        long start = System.currentTimeMillis();
         try {
-            return buildLiveAnalysis();
-        } catch (Exception e) {
-            log.error("Failed to build live shrinkage analysis — returning mock data: {}", e.getMessage(), e);
-            return buildMockResponse();
+            if (!snowflakeExecutor.isConfigured()) {
+                log.info("Snowflake not configured — returning mock shrinkage data");
+                return buildMockResponse();
+            }
+
+            try {
+                return buildLiveAnalysis();
+            } catch (Exception e) {
+                log.error("Failed to build live shrinkage analysis — returning mock data: {}", e.getMessage(), e);
+                return buildMockResponse();
+            }
+        } finally {
+            moduleMetrics.record("shrinkage", System.currentTimeMillis() - start);
         }
+    }
+
+    // Expose tenantContext for cache key SpEL expression
+    public TenantContext getTenantContext() {
+        return tenantContext;
     }
 
     // -------------------------------------------------------------------------
@@ -104,7 +114,7 @@ public class ShrinkageController {
                 + "  ROUND(TOTAL_ACW * 1.0 / NULLIF(CONTACT_COUNT, 0), 1) AS AVG_ACW_PER_CONTACT,\n"
                 + "  ROUND(TOTAL_HANDLE * 1.0 / NULLIF(DAYS_ACTIVE, 0), 1) AS HANDLE_PER_DAY\n"
                 + "FROM agent_metrics\n"
-                + "ORDER BY (28800 * DAYS_ACTIVE - TOTAL_HANDLE) DESC\n"
+                + "ORDER BY (" + shrinkageConfig.getShiftSeconds() + " * DAYS_ACTIVE - TOTAL_HANDLE) DESC\n"
                 + "LIMIT 100";
 
         log.debug("Executing shrinkage query for tenant {}", tenantId);
@@ -168,14 +178,14 @@ public class ShrinkageController {
 
             // Shrinkage calculation
             double handlePerDay = daysActive > 0 ? totalHandle / daysActive : 0;
-            double nonProductivePerDay = SHIFT_SECONDS - handlePerDay;
-            double shrinkageRate = (double) nonProductivePerDay / SHIFT_SECONDS;
+            double nonProductivePerDay = shrinkageConfig.getShiftSeconds() - handlePerDay;
+            double shrinkageRate = (double) nonProductivePerDay / shrinkageConfig.getShiftSeconds();
             if (shrinkageRate < 0) shrinkageRate = 0;
 
             String shrinkageLevel;
-            if (shrinkageRate <= ELEVATED_THRESHOLD) {
+            if (shrinkageRate <= shrinkageConfig.getElevatedThreshold()) {
                 shrinkageLevel = "normal";
-            } else if (shrinkageRate <= EXCESSIVE_THRESHOLD) {
+            } else if (shrinkageRate <= shrinkageConfig.getExcessiveThreshold()) {
                 shrinkageLevel = "elevated";
             } else {
                 shrinkageLevel = "excessive";
@@ -183,12 +193,12 @@ public class ShrinkageController {
 
             // Cost quantification
             double excessIdleHours = 0;
-            if (shrinkageRate > NORMAL_SHRINKAGE) {
-                excessIdleHours = (shrinkageRate - NORMAL_SHRINKAGE) * 8.0 * daysActive;
+            if (shrinkageRate > shrinkageConfig.getNormalShrinkage()) {
+                excessIdleHours = (shrinkageRate - shrinkageConfig.getNormalShrinkage()) * 8.0 * daysActive;
             }
-            double costImpact = excessIdleHours * COST_PER_HOUR;
+            double costImpact = excessIdleHours * shrinkageConfig.getCostPerHour();
 
-            if (shrinkageRate > ELEVATED_THRESHOLD) {
+            if (shrinkageRate > shrinkageConfig.getElevatedThreshold()) {
                 excessiveShrinkageCount++;
             }
             totalExcessIdleHours += excessIdleHours;
@@ -196,7 +206,7 @@ public class ShrinkageController {
 
             // Flags
             List<String> flags = new ArrayList<>();
-            if (teamAvgAcwPerContact > 0 && avgAcwPerContact > ACW_FLAG_FACTOR * teamAvgAcwPerContact) {
+            if (teamAvgAcwPerContact > 0 && avgAcwPerContact > shrinkageConfig.getAcwFlagFactor() * teamAvgAcwPerContact) {
                 double ratio = avgAcwPerContact / teamAvgAcwPerContact;
                 flags.add(String.format("Extended ACW (%.1fx team avg)", ratio));
             }
@@ -230,7 +240,7 @@ public class ShrinkageController {
 
         // Team summary
         double avgShrinkageRate = totalShrinkageSum / rows.size();
-        double estimatedWeeklyCost = totalExcessIdleHours * COST_PER_HOUR;
+        double estimatedWeeklyCost = totalExcessIdleHours * shrinkageConfig.getCostPerHour();
 
         Map<String, Object> teamSummary = new LinkedHashMap<>();
         teamSummary.put("totalAgents", rows.size());

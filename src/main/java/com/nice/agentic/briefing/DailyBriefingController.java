@@ -1,7 +1,10 @@
 package com.nice.agentic.briefing;
 
 import com.nice.agentic.TenantContext;
+import com.nice.agentic.config.ModuleMetrics;
 import com.nice.agentic.query.SnowflakeExecutor;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -38,6 +41,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/briefing")
+@Tag(name = "Briefing")
 public class DailyBriefingController {
 
     private static final Logger log = LoggerFactory.getLogger(DailyBriefingController.class);
@@ -55,16 +59,19 @@ public class DailyBriefingController {
     private final SnowflakeExecutor snowflakeExecutor;
     private final TenantContext tenantContext;
     private final BedrockRuntimeClient bedrock;
+    private final ModuleMetrics moduleMetrics;
 
     @Value("${agentic.bedrock.model-id}")
     private String modelId;
 
     public DailyBriefingController(SnowflakeExecutor snowflakeExecutor,
                                    TenantContext tenantContext,
-                                   BedrockRuntimeClient bedrock) {
+                                   BedrockRuntimeClient bedrock,
+                                   ModuleMetrics moduleMetrics) {
         this.snowflakeExecutor = snowflakeExecutor;
         this.tenantContext = tenantContext;
         this.bedrock = bedrock;
+        this.moduleMetrics = moduleMetrics;
     }
 
     // -------------------------------------------------------------------------
@@ -72,25 +79,34 @@ public class DailyBriefingController {
     // -------------------------------------------------------------------------
 
     @GetMapping("/today")
+    @Operation(
+            summary = "Get today's supervisor briefing",
+            description = "Generates a personalized morning briefing by aggregating signals across all analytics modules "
+                    + "and using an LLM to synthesize them into a concise, actionable executive summary. "
+                    + "Includes priorities, wins, risks, and a top recommendation for the day.")
     public Map<String, Object> today() {
         long start = System.currentTimeMillis();
 
-        if (!snowflakeExecutor.isConfigured()) {
-            log.info("Snowflake not configured — returning mock daily briefing");
-            Map<String, Object> mock = buildMockResponse();
-            log.info("Daily briefing generated in {}ms (mock)", System.currentTimeMillis() - start);
-            return mock;
-        }
-
         try {
-            Map<String, Object> result = buildLiveBriefing();
-            log.info("Daily briefing generated in {}ms", System.currentTimeMillis() - start);
-            return result;
-        } catch (Exception e) {
-            log.error("Failed to build live briefing — returning mock: {}", e.getMessage(), e);
-            Map<String, Object> mock = buildMockResponse();
-            log.info("Daily briefing generated in {}ms (fallback)", System.currentTimeMillis() - start);
-            return mock;
+            if (!snowflakeExecutor.isConfigured()) {
+                log.info("Snowflake not configured — returning mock daily briefing");
+                Map<String, Object> mock = buildMockResponse();
+                log.info("Daily briefing generated in {}ms (mock)", System.currentTimeMillis() - start);
+                return mock;
+            }
+
+            try {
+                Map<String, Object> result = buildLiveBriefing();
+                log.info("Daily briefing generated in {}ms", System.currentTimeMillis() - start);
+                return result;
+            } catch (Exception e) {
+                log.error("Failed to build live briefing — returning mock: {}", e.getMessage(), e);
+                Map<String, Object> mock = buildMockResponse();
+                log.info("Daily briefing generated in {}ms (fallback)", System.currentTimeMillis() - start);
+                return mock;
+            }
+        } finally {
+            moduleMetrics.record("briefing", System.currentTimeMillis() - start);
         }
     }
 

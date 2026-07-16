@@ -1,9 +1,14 @@
 package com.nice.agentic.roi;
 
 import com.nice.agentic.TenantContext;
+import com.nice.agentic.config.AnalyticsConfig;
+import com.nice.agentic.config.ModuleMetrics;
 import com.nice.agentic.query.SnowflakeExecutor;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -32,26 +37,24 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/roi")
+@Tag(name = "ROI")
 public class RoiDashboardController {
 
     private static final Logger log = LoggerFactory.getLogger(RoiDashboardController.class);
 
-    // -------------------------------------------------------------------------
-    // Cost Model Constants
-    // -------------------------------------------------------------------------
-
-    private static final double COST_PER_AGENT_HOUR = 25.0;
-    private static final double COST_PER_CONTACT = 0.50;
-    private static final double ATTRITION_REPLACEMENT_COST = 8000.0;
-    private static final double SLA_BREACH_PENALTY_PER_PCT = 500.0;
-
     private final SnowflakeExecutor snowflakeExecutor;
     private final TenantContext tenantContext;
+    private final AnalyticsConfig.Roi roiConfig;
+    private final ModuleMetrics moduleMetrics;
 
     public RoiDashboardController(SnowflakeExecutor snowflakeExecutor,
-                                  TenantContext tenantContext) {
+                                  TenantContext tenantContext,
+                                  AnalyticsConfig analyticsConfig,
+                                  ModuleMetrics moduleMetrics) {
         this.snowflakeExecutor = snowflakeExecutor;
         this.tenantContext = tenantContext;
+        this.roiConfig = analyticsConfig.getRoi();
+        this.moduleMetrics = moduleMetrics;
     }
 
     // -------------------------------------------------------------------------
@@ -59,22 +62,38 @@ public class RoiDashboardController {
     // -------------------------------------------------------------------------
 
     @GetMapping("/summary")
+    @Cacheable(value = "roiSummary", key = "#root.target.tenantContext.tenantId")
+    @Operation(
+            summary = "Get ROI and cost savings summary",
+            description = "Aggregates cost savings across all platform features into a single executive ROI view. "
+                    + "Covers smart overflow, coaching effectiveness, contact deflection, shrinkage recovery, "
+                    + "and attrition prevention with monthly and annual savings estimates.")
     public Map<String, Object> summary() {
-        if (snowflakeExecutor.isConfigured()) {
-            try {
-                Map<String, Object> liveResponse = buildLiveResponse();
-                if (liveResponse != null) {
-                    log.info("Returning live ROI summary");
-                    return liveResponse;
+        long start = System.currentTimeMillis();
+        try {
+            if (snowflakeExecutor.isConfigured()) {
+                try {
+                    Map<String, Object> liveResponse = buildLiveResponse();
+                    if (liveResponse != null) {
+                        log.info("Returning live ROI summary");
+                        return liveResponse;
+                    }
+                    log.warn("Live ROI query returned no results — falling back to mock data");
+                } catch (Exception e) {
+                    log.error("Failed to build live ROI summary — falling back to mock data: {}",
+                            e.getMessage(), e);
                 }
-                log.warn("Live ROI query returned no results — falling back to mock data");
-            } catch (Exception e) {
-                log.error("Failed to build live ROI summary — falling back to mock data: {}",
-                        e.getMessage(), e);
             }
-        }
 
-        return buildMockResponse();
+            return buildMockResponse();
+        } finally {
+            moduleMetrics.record("roi", System.currentTimeMillis() - start);
+        }
+    }
+
+    // Expose tenantContext for cache key SpEL expression
+    public TenantContext getTenantContext() {
+        return tenantContext;
     }
 
     // -------------------------------------------------------------------------
@@ -265,20 +284,20 @@ public class RoiDashboardController {
         double slaCompliance = toDouble(row.get("SLA_COMPLIANCE"), 0);
 
         // Calculate savings per category (weekly -> monthly)
-        double overflowWeeklySavings = breachContacts * COST_PER_CONTACT
-                + (atRiskQueues > 0 ? atRiskQueues * SLA_BREACH_PENALTY_PER_PCT * 0.01 : 0);
+        double overflowWeeklySavings = breachContacts * roiConfig.getCostPerContact()
+                + (atRiskQueues > 0 ? atRiskQueues * roiConfig.getSlaBreachPenaltyPerPct() * 0.01 : 0);
         double overflowMonthlySavings = overflowWeeklySavings * 4.3;
 
-        double coachingWeeklySavings = coachingHoursSaved * COST_PER_AGENT_HOUR;
+        double coachingWeeklySavings = coachingHoursSaved * roiConfig.getCostPerAgentHour();
         double coachingMonthlySavings = coachingWeeklySavings * 4.3;
 
         double automatableContactsMonthly = automatableContacts14d * (30.0 / 14.0);
-        double deflectionMonthlySavings = automatableContactsMonthly * 0.4 * COST_PER_CONTACT;
+        double deflectionMonthlySavings = automatableContactsMonthly * 0.4 * roiConfig.getCostPerContact();
 
-        double shrinkageWeeklySavings = excessIdleHours * COST_PER_AGENT_HOUR;
+        double shrinkageWeeklySavings = excessIdleHours * roiConfig.getCostPerAgentHour();
         double shrinkageMonthlySavings = shrinkageWeeklySavings * 4.3;
 
-        double attritionMonthlySavings = atRiskAgents * 0.3 * ATTRITION_REPLACEMENT_COST;
+        double attritionMonthlySavings = atRiskAgents * 0.3 * roiConfig.getAttritionReplacementCost();
 
         double totalMonthlySavings = overflowMonthlySavings + coachingMonthlySavings
                 + deflectionMonthlySavings + shrinkageMonthlySavings + attritionMonthlySavings;
@@ -396,7 +415,7 @@ public class RoiDashboardController {
         attrition.put("monthlySavings", String.format("$%,.0f", attritionMonthlySavings));
         attrition.put("detail", String.format("%d at-risk agents identified early — retention interventions initiated",
                 atRiskAgents));
-        double preventedCost = atRiskAgents * 0.3 * ATTRITION_REPLACEMENT_COST;
+        double preventedCost = atRiskAgents * 0.3 * roiConfig.getAttritionReplacementCost();
         attrition.put("metric", String.format("Prevented ~$%,.0fK in replacement costs", preventedCost / 1000.0));
         roiBreakdown.add(attrition);
 

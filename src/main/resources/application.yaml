@@ -29,6 +29,57 @@ spring:
   mvc:
     async:
       request-timeout: 120000
+  cache:
+    type: caffeine
+
+# ---------------------------------------------------------------------------
+# Analytics thresholds (externalized from controllers)
+# ---------------------------------------------------------------------------
+agentic.analytics:
+  roi:
+    cost-per-agent-hour: 25.0
+    cost-per-contact: 0.50
+    attrition-replacement-cost: 8000.0
+    sla-breach-penalty-per-pct: 500.0
+  shrinkage:
+    shift-seconds: 28800
+    cost-per-hour: 25.0
+    normal-shrinkage: 0.30
+    elevated-threshold: 0.35
+    excessive-threshold: 0.45
+    acw-flag-factor: 1.5
+  burnout:
+    aht-high-threshold: 0.20
+    aht-medium-threshold: 0.10
+    aht-low-threshold: 0.05
+    aht-high-points: 30
+    aht-medium-points: 20
+    aht-low-points: 10
+    refusal-high-threshold: 0.15
+    refusal-medium-threshold: 0.10
+    refusal-low-threshold: 0.05
+    refusal-high-points: 25
+    refusal-medium-points: 20
+    refusal-low-points: 10
+    volume-high-threshold: -0.30
+    volume-medium-threshold: -0.20
+    volume-low-threshold: -0.10
+    volume-high-points: 25
+    volume-medium-points: 15
+    volume-low-points: 10
+    consistency-high-threshold: 0.4
+    consistency-medium-threshold: 0.3
+    consistency-low-threshold: 0.2
+    consistency-high-points: 20
+    consistency-medium-points: 15
+    consistency-low-points: 10
+    high-risk-threshold: 60
+    medium-risk-threshold: 35
+    minimum-display-score: 25
+  forecast:
+    contacts-per-agent-per-hour: 8
+    forecast-hours: 4
+    history-days: 28
 
 snowflake:
   account: ${SNOWFLAKE_ACCOUNT:placeholder-account}

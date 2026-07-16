@@ -1,9 +1,14 @@
 package com.nice.agentic.burnout;
 
 import com.nice.agentic.TenantContext;
+import com.nice.agentic.config.AnalyticsConfig;
+import com.nice.agentic.config.ModuleMetrics;
 import com.nice.agentic.query.SnowflakeExecutor;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -22,17 +27,29 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/burnout")
+@Tag(name = "Burnout")
 public class BurnoutRiskController {
 
     private static final Logger log = LoggerFactory.getLogger(BurnoutRiskController.class);
 
     private final SnowflakeExecutor snowflakeExecutor;
     private final TenantContext tenantContext;
+    private final ModuleMetrics moduleMetrics;
+    private final AnalyticsConfig.Burnout burnoutConfig;
 
     public BurnoutRiskController(SnowflakeExecutor snowflakeExecutor,
-                                  TenantContext tenantContext) {
+                                  TenantContext tenantContext,
+                                  ModuleMetrics moduleMetrics,
+                                  AnalyticsConfig analyticsConfig) {
         this.snowflakeExecutor = snowflakeExecutor;
         this.tenantContext = tenantContext;
+        this.moduleMetrics = moduleMetrics;
+        this.burnoutConfig = analyticsConfig.getBurnout();
+    }
+
+    // Expose tenantContext for cache key SpEL expression
+    public TenantContext getTenantContext() {
+        return tenantContext;
     }
 
     // -------------------------------------------------------------------------
@@ -40,23 +57,34 @@ public class BurnoutRiskController {
     // -------------------------------------------------------------------------
 
     @GetMapping("/risk")
+    @Cacheable(value = "burnoutRisk", key = "#root.target.tenantContext.tenantId")
+    @Operation(
+            summary = "Get agent burnout risk scores",
+            description = "Analyzes agent behavior patterns over the last 14 days to detect early signs of burnout "
+                    + "or attrition risk. Scores each agent on a 0-100 risk scale based on rising AHT trend, "
+                    + "increasing refusals, volume drop, and consistency variance. Returns ranked list with recommendations.")
     public Map<String, Object> risk() {
-        if (!snowflakeExecutor.isConfigured()) {
-            log.info("Snowflake not configured — returning mock burnout risk data");
-            return buildMockResponse();
-        }
-
+        long start = System.currentTimeMillis();
         try {
-            Map<String, Object> liveResponse = buildLiveResponse();
-            if (liveResponse != null) {
-                return liveResponse;
+            if (!snowflakeExecutor.isConfigured()) {
+                log.info("Snowflake not configured — returning mock burnout risk data");
+                return buildMockResponse();
             }
-            log.warn("Live burnout risk query returned no results — falling back to mock data");
-        } catch (Exception e) {
-            log.error("Failed to build live burnout risk response — falling back to mock data: {}", e.getMessage(), e);
-        }
 
-        return buildMockResponse();
+            try {
+                Map<String, Object> liveResponse = buildLiveResponse();
+                if (liveResponse != null) {
+                    return liveResponse;
+                }
+                log.warn("Live burnout risk query returned no results — falling back to mock data");
+            } catch (Exception e) {
+                log.error("Failed to build live burnout risk response — falling back to mock data: {}", e.getMessage(), e);
+            }
+
+            return buildMockResponse();
+        } finally {
+            moduleMetrics.record("burnout", System.currentTimeMillis() - start);
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -126,10 +154,10 @@ public class BurnoutRiskController {
         // Sort by riskScore DESC
         scoredAgents.sort((a, b) -> Integer.compare(toInt(b.get("riskScore")), toInt(a.get("riskScore"))));
 
-        // Only return agents with score >= 25, limit to top 50
+        // Only return agents with score >= minimum display score, limit to top 50
         List<Map<String, Object>> filteredAgents = new ArrayList<>();
         for (Map<String, Object> agent : scoredAgents) {
-            if (toInt(agent.get("riskScore")) >= 25 && filteredAgents.size() < 50) {
+            if (toInt(agent.get("riskScore")) >= burnoutConfig.getMinimumDisplayScore() && filteredAgents.size() < 50) {
                 filteredAgents.add(agent);
             }
         }
@@ -156,12 +184,12 @@ public class BurnoutRiskController {
         // 1. AHT Trend (0-30 points)
         double ahtChange = (recentAht - prevAht) / prevAht;
         int ahtPoints = 0;
-        if (ahtChange > 0.20) {
-            ahtPoints = 30;
-        } else if (ahtChange > 0.10) {
-            ahtPoints = 20;
-        } else if (ahtChange > 0.05) {
-            ahtPoints = 10;
+        if (ahtChange > burnoutConfig.getAhtHighThreshold()) {
+            ahtPoints = burnoutConfig.getAhtHighPoints();
+        } else if (ahtChange > burnoutConfig.getAhtMediumThreshold()) {
+            ahtPoints = burnoutConfig.getAhtMediumPoints();
+        } else if (ahtChange > burnoutConfig.getAhtLowThreshold()) {
+            ahtPoints = burnoutConfig.getAhtLowPoints();
         }
         if (ahtPoints > 0) {
             Map<String, Object> signal = new LinkedHashMap<>();
@@ -177,12 +205,12 @@ public class BurnoutRiskController {
                 ? (double) recentRefusals / recentContacts
                 : 0.0;
         int refusalPoints = 0;
-        if (refusalRate > 0.15) {
-            refusalPoints = 25;
-        } else if (refusalRate > 0.10) {
-            refusalPoints = 20;
-        } else if (refusalRate > 0.05) {
-            refusalPoints = 10;
+        if (refusalRate > burnoutConfig.getRefusalHighThreshold()) {
+            refusalPoints = burnoutConfig.getRefusalHighPoints();
+        } else if (refusalRate > burnoutConfig.getRefusalMediumThreshold()) {
+            refusalPoints = burnoutConfig.getRefusalMediumPoints();
+        } else if (refusalRate > burnoutConfig.getRefusalLowThreshold()) {
+            refusalPoints = burnoutConfig.getRefusalLowPoints();
         }
         if (refusalPoints > 0) {
             double prevRefusalRate = prevContacts > 0
@@ -199,12 +227,12 @@ public class BurnoutRiskController {
         // 3. Volume Drop (0-25 points)
         double volumeChange = (double) (recentContacts - prevContacts) / prevContacts;
         int volumePoints = 0;
-        if (volumeChange < -0.30) {
-            volumePoints = 25;
-        } else if (volumeChange < -0.20) {
-            volumePoints = 15;
-        } else if (volumeChange < -0.10) {
-            volumePoints = 10;
+        if (volumeChange < burnoutConfig.getVolumeHighThreshold()) {
+            volumePoints = burnoutConfig.getVolumeHighPoints();
+        } else if (volumeChange < burnoutConfig.getVolumeMediumThreshold()) {
+            volumePoints = burnoutConfig.getVolumeMediumPoints();
+        } else if (volumeChange < burnoutConfig.getVolumeLowThreshold()) {
+            volumePoints = burnoutConfig.getVolumeLowPoints();
         }
         if (volumePoints > 0) {
             Map<String, Object> signal = new LinkedHashMap<>();
@@ -218,12 +246,12 @@ public class BurnoutRiskController {
         // 4. Consistency / Variance (0-20 points)
         double coefficientOfVariation = recentAht > 0 ? recentStddevAht / recentAht : 0.0;
         int consistencyPoints = 0;
-        if (coefficientOfVariation > 0.4) {
-            consistencyPoints = 20;
-        } else if (coefficientOfVariation > 0.3) {
-            consistencyPoints = 15;
-        } else if (coefficientOfVariation > 0.2) {
-            consistencyPoints = 10;
+        if (coefficientOfVariation > burnoutConfig.getConsistencyHighThreshold()) {
+            consistencyPoints = burnoutConfig.getConsistencyHighPoints();
+        } else if (coefficientOfVariation > burnoutConfig.getConsistencyMediumThreshold()) {
+            consistencyPoints = burnoutConfig.getConsistencyMediumPoints();
+        } else if (coefficientOfVariation > burnoutConfig.getConsistencyLowThreshold()) {
+            consistencyPoints = burnoutConfig.getConsistencyLowPoints();
         }
         if (consistencyPoints > 0) {
             Map<String, Object> signal = new LinkedHashMap<>();
@@ -236,9 +264,9 @@ public class BurnoutRiskController {
 
         // Determine risk level
         String riskLevel;
-        if (totalScore >= 60) {
+        if (totalScore >= burnoutConfig.getHighRiskThreshold()) {
             riskLevel = "high";
-        } else if (totalScore >= 35) {
+        } else if (totalScore >= burnoutConfig.getMediumRiskThreshold()) {
             riskLevel = "medium";
         } else {
             riskLevel = "low";
@@ -271,15 +299,15 @@ public class BurnoutRiskController {
 
     private String generateRecommendation(int totalScore, int ahtPoints, int refusalPoints,
                                            int volumePoints, int consistencyPoints) {
-        if (totalScore >= 60) {
+        if (totalScore >= burnoutConfig.getHighRiskThreshold()) {
             if (refusalPoints >= 20 && volumePoints >= 15) {
                 return "Urgent: Schedule immediate 1:1 check-in. Consider temporary removal from queue and wellness support.";
             }
-            if (ahtPoints >= 30) {
+            if (ahtPoints >= burnoutConfig.getAhtHighPoints()) {
                 return "Schedule 1:1 check-in. Consider temporary skill reduction or schedule adjustment.";
             }
             return "High burnout risk detected. Schedule wellness check-in and review workload distribution.";
-        } else if (totalScore >= 35) {
+        } else if (totalScore >= burnoutConfig.getMediumRiskThreshold()) {
             if (volumePoints >= 15) {
                 return "Monitor contact volume trend. Consider schedule flexibility or skill rotation.";
             }

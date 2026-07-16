@@ -1,7 +1,10 @@
 package com.nice.agentic.anomaly;
 
 import com.nice.agentic.TenantContext;
+import com.nice.agentic.config.ModuleMetrics;
 import com.nice.agentic.query.SnowflakeExecutor;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -34,6 +37,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/anomaly")
+@Tag(name = "Anomaly")
 public class AnomalyDetectionController {
 
     private static final Logger log = LoggerFactory.getLogger(AnomalyDetectionController.class);
@@ -45,11 +49,14 @@ public class AnomalyDetectionController {
 
     private final SnowflakeExecutor snowflakeExecutor;
     private final TenantContext tenantContext;
+    private final ModuleMetrics moduleMetrics;
 
     public AnomalyDetectionController(SnowflakeExecutor snowflakeExecutor,
-                                      TenantContext tenantContext) {
+                                      TenantContext tenantContext,
+                                      ModuleMetrics moduleMetrics) {
         this.snowflakeExecutor = snowflakeExecutor;
         this.tenantContext = tenantContext;
+        this.moduleMetrics = moduleMetrics;
     }
 
     // -------------------------------------------------------------------------
@@ -57,17 +64,27 @@ public class AnomalyDetectionController {
     // -------------------------------------------------------------------------
 
     @GetMapping("/detect")
+    @Operation(
+            summary = "Detect real-time anomalies",
+            description = "Detects statistical anomalies across all metrics using z-score analysis against historical baselines. "
+                    + "Covers AHT spikes, volume surges, refusal clusters, and skill imbalances. "
+                    + "Returns anomalies ranked by severity with suggested actions.")
     public Map<String, Object> detect() {
-        if (!snowflakeExecutor.isConfigured()) {
-            log.info("Snowflake not configured — returning mock anomaly data");
-            return buildMockResponse();
-        }
-
+        long start = System.currentTimeMillis();
         try {
-            return buildLiveResponse();
-        } catch (Exception e) {
-            log.error("Failed to build live anomaly detection — returning mock data: {}", e.getMessage(), e);
-            return buildMockResponse();
+            if (!snowflakeExecutor.isConfigured()) {
+                log.info("Snowflake not configured — returning mock anomaly data");
+                return buildMockResponse();
+            }
+
+            try {
+                return buildLiveResponse();
+            } catch (Exception e) {
+                log.error("Failed to build live anomaly detection — returning mock data: {}", e.getMessage(), e);
+                return buildMockResponse();
+            }
+        } finally {
+            moduleMetrics.record("anomaly", System.currentTimeMillis() - start);
         }
     }
 

@@ -1,7 +1,10 @@
 package com.nice.agentic.deflection;
 
 import com.nice.agentic.TenantContext;
+import com.nice.agentic.config.ModuleMetrics;
 import com.nice.agentic.query.SnowflakeExecutor;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -34,6 +37,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/deflection")
+@Tag(name = "Deflection")
 public class DeflectionController {
 
     private static final Logger log = LoggerFactory.getLogger(DeflectionController.class);
@@ -45,11 +49,14 @@ public class DeflectionController {
 
     private final SnowflakeExecutor snowflakeExecutor;
     private final TenantContext tenantContext;
+    private final ModuleMetrics moduleMetrics;
 
     public DeflectionController(SnowflakeExecutor snowflakeExecutor,
-                                TenantContext tenantContext) {
+                                TenantContext tenantContext,
+                                ModuleMetrics moduleMetrics) {
         this.snowflakeExecutor = snowflakeExecutor;
         this.tenantContext = tenantContext;
+        this.moduleMetrics = moduleMetrics;
     }
 
     // -------------------------------------------------------------------------
@@ -57,22 +64,32 @@ public class DeflectionController {
     // -------------------------------------------------------------------------
 
     @GetMapping("/opportunities")
+    @Operation(
+            summary = "Get contact deflection opportunities",
+            description = "Identifies high-volume, low-complexity contact types that could be automated via IVR or chatbot. "
+                    + "Scores each opportunity using volume, simplicity, consistency, and agent breadth factors. "
+                    + "Returns cost savings estimates for each automation opportunity.")
     public Map<String, Object> opportunities() {
-        if (snowflakeExecutor.isConfigured()) {
-            try {
-                Map<String, Object> liveResponse = buildLiveResponse();
-                if (liveResponse != null) {
-                    log.info("Returning live deflection opportunities");
-                    return liveResponse;
+        long start = System.currentTimeMillis();
+        try {
+            if (snowflakeExecutor.isConfigured()) {
+                try {
+                    Map<String, Object> liveResponse = buildLiveResponse();
+                    if (liveResponse != null) {
+                        log.info("Returning live deflection opportunities");
+                        return liveResponse;
+                    }
+                    log.warn("Live deflection query returned no results — falling back to mock data");
+                } catch (Exception e) {
+                    log.error("Failed to build live deflection opportunities — falling back to mock data: {}",
+                            e.getMessage(), e);
                 }
-                log.warn("Live deflection query returned no results — falling back to mock data");
-            } catch (Exception e) {
-                log.error("Failed to build live deflection opportunities — falling back to mock data: {}",
-                        e.getMessage(), e);
             }
-        }
 
-        return buildMockResponse();
+            return buildMockResponse();
+        } finally {
+            moduleMetrics.record("deflection", System.currentTimeMillis() - start);
+        }
     }
 
     // -------------------------------------------------------------------------
