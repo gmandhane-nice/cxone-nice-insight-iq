@@ -1,653 +1,680 @@
-# Agentic RCA Sample - AI-Powered Contact Center Analytics Platform
+# InsightIQ — Agentic Decision Intelligence Platform
 
-A comprehensive Spring Boot application that transforms contact center operations through real-time AI-powered analytics, predictive insights, and automated recommendations. Built with AWS Bedrock (Claude), Snowflake, and modern Java frameworks.
-
-## Overview
-
-This platform provides 9 intelligent modules that deliver actionable intelligence to supervisors, enabling proactive decision-making and quantifiable ROI improvements. The system processes real-time contact center data from Snowflake, applies advanced analytics (z-score anomaly detection, Erlang-C staffing models, burnout risk scoring), and generates executive insights using AWS Bedrock's Claude LLM.
-
-**Key Differentiators:**
-- Real-time Snowflake data integration with read-only access
-- Predictive analytics with 28-day historical pattern analysis
-- Dollar-value ROI quantification across all modules
-- AI-generated daily briefings personalized for supervisors
-- Graceful degradation to mock data when external systems unavailable
-
-## Architecture
-
-The platform follows a modular, feature-based architecture where each analytics capability is encapsulated in its own package with dedicated controllers, services, and data access layers.
-
-![Architecture Diagram](docs/diagrams/architecture-flow.md)
-
-### System Components
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                      Frontend (HTML/JS SPA)                      │
-│                    /src/main/resources/static                    │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │ REST API
-┌──────────────────────────────┴──────────────────────────────────┐
-│                    Spring Boot Application                       │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │  9 Analytics Modules (Controllers + Services)            │  │
-│  │  - Smart Overflow  - Demand Forecast  - Burnout Risk    │  │
-│  │  - Anomaly Detection  - What-If Simulator  - Shrinkage  │  │
-│  │  - Deflection Opportunities  - ROI Dashboard  - Briefing │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                               │                                  │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │  Shared Infrastructure                                    │  │
-│  │  - TenantContext (multi-tenant isolation)                │  │
-│  │  - SnowflakeExecutor (query layer)                       │  │
-│  │  - BedrockHelper (LLM integration)                       │  │
-│  │  - GlobalExceptionHandler                                │  │
-│  └──────────────────────────────────────────────────────────┘  │
-└─────────────┬───────────────────────────────────┬───────────────┘
-              │                                   │
-     ┌────────▼──────────┐           ┌───────────▼──────────┐
-     │   Snowflake DB    │           │   AWS Bedrock        │
-     │   (via JDBC)      │           │   (Claude Model)     │
-     │   Views:          │           │   Converse API       │
-     │   - AGENT_CONTACT │           └──────────────────────┘
-     │   - USER_DIM      │
-     │   - SKILL_DIM     │
-     └───────────────────┘
-```
-
-### Data Flow
-
-1. **Request Ingestion**: REST endpoint receives request with optional tenant context
-2. **Tenant Resolution**: TenantContext extracts tenant ID from headers/params
-3. **Data Retrieval**: SnowflakeExecutor runs tenant-scoped SQL queries
-4. **Analytics Processing**: Module-specific logic (statistical models, ML scoring)
-5. **AI Enhancement**: Optional LLM call via Bedrock for natural language insights
-6. **Response Assembly**: Structured JSON with metrics, insights, and recommendations
-7. **Fallback Handling**: Returns realistic mock data if Snowflake unavailable
-
-## Features
-
-### 1. Smart Overflow Recommendations (`/risk/overflow/recommendations`)
-
-Cross-references at-risk queues with coaching-completed agents and recommends skill assignments.
-
-**Endpoint:** `GET /risk/overflow/recommendations`
-
-**Algorithm:**
-- Identifies skills with queue depth > 5 OR growing contact volume
-- For each at-risk skill, queries agents with AHT <= team average (coaching complete)
-- Uses CompletableFuture for parallel proficiency checks across top 5 skills
-- Recommends reassigning proficient agents from other skills
-
-**Request Example:**
-```bash
-curl -H "X-Tenant-ID: tenant_abc123" \
-  http://localhost:8080/risk/overflow/recommendations
-```
-
-**Response Example:**
-```json
-{
-  "generatedAt": "2026-07-16T18:30:00Z",
-  "totalAtRiskSkills": 2,
-  "totalCandidateAgents": 5,
-  "recommendations": [
-    {
-      "skillName": "Billing_Support",
-      "skillNo": 1042,
-      "severity": "critical",
-      "queueDepth": 24,
-      "activeAgents": 8,
-      "trendPct": 35.2,
-      "trendDirection": "increasing",
-      "currentAvgAht": 285.0,
-      "teamAvgAht": 200.0,
-      "agentsNeeded": 5,
-      "candidateAgents": [
-        {
-          "agentName": "Maria Santos",
-          "agentAht": 180.0,
-          "teamAvgAht": 200.0,
-          "gapRatio": 0.9,
-          "contactsHandled": 45,
-          "currentSkill": "General_Support"
-        }
-      ],
-      "predictedQueueReduction": "45%",
-      "action": "Assign 3 proficient agent(s) to Billing_Support",
-      "rationale": "These agents have completed coaching for Billing_Support (AHT at or below team average). Reassigning them will reduce queue depth by ~45%."
-    }
-  ]
-}
-```
-
-**Business Impact:** $483K/month in SLA breach prevention
+An AI-powered decision intelligence platform for contact center management. InsightIQ uses multi-agent AI orchestration to monitor operations 24/7, identify revenue leakage in real time, and prescribe exactly what to do about it.
 
 ---
 
-### 2. Predictive Demand Forecasting (`/forecast/demand`)
+## Executive Summary (for Senior Leadership)
 
-Analyzes 28-day historical contact volume patterns and forecasts next 4 hours with staffing recommendations.
+InsightIQ transforms contact center operations from **reactive to proactive**. Instead of supervisors discovering problems after they happen, the platform identifies issues in real-time and prescribes exactly what to do.
 
-**Endpoint:** `GET /forecast/demand`
+**The Problem It Solves:**
+- Supervisors today rely on static dashboards and manual analysis
+- Problems are discovered after SLA failures, not before
+- Staffing decisions are based on gut feeling, not data
+- Agent burnout and attrition go undetected until it's too late
+- Millions in savings opportunities remain hidden in operational data
 
-**Algorithm:**
-- Builds lookup table: day-of-week × hour-of-day → (avg_volume, max_volume)
-- Compares predicted vs actual for current hour
-- Forecasts next 4 hours using historical patterns
-- Calculates staffing sufficiency: adequate, understaffed, critical, overstaffed
-- Flags surge alerts when predicted volume > baseline + 15%
+**How It Works:**
+- 9 AI modules run continuously, analyzing live contact center data
+- Multi-agent AI orchestration (Claude on AWS Bedrock) generates insights in natural language
+- Prescriptive recommendations tell supervisors *what to do*, not just *what happened*
+- Mathematical models (Erlang-C, Z-score) provide statistical confidence
 
-**Request Example:**
-```bash
-curl -H "X-Tenant-ID: tenant_abc123" \
-  http://localhost:8080/forecast/demand
-```
+**Business Impact:**
+- Quantified ROI across coaching, overflow, deflection, shrinkage, and attrition
+- Prevents SLA failures through predictive alerting and prescriptive fixes
+- Reduces agent turnover through early burnout detection
+- Identifies automation opportunities to reduce contact volume
+- Replaces manual reporting with AI-generated executive briefings
 
-**Response Example:**
-```json
-{
-  "generatedAt": "2026-07-16T18:30:00Z",
-  "currentHour": {
-    "hour": 18,
-    "actualVolume": 342,
-    "predictedVolume": 380,
-    "activeAgents": 45
-  },
-  "forecast": [
-    {
-      "hour": 19,
-      "dayOfWeek": "TUESDAY",
-      "predictedVolume": 420,
-      "historicalAvg": 415,
-      "historicalMax": 510,
-      "staffingSufficiency": "understaffed",
-      "agentsRecommended": 53,
-      "surgeAlert": true
-    }
-  ],
-  "insights": [
-    "Contact volume expected to peak at 20:00 (+49% vs current)",
-    "Historically, Tuesdays 20:00-21:00 see 12% more contacts than weekly average",
-    "2 upcoming hour(s) forecast critical staffing shortage — consider calling in additional agents"
-  ]
-}
-```
+**Differentiators vs. Traditional Dashboards:**
 
-**Business Impact:** Proactive capacity planning prevents service degradation
+| Traditional BI | InsightIQ |
+|---------------|-----------|
+| Shows what happened | Predicts what will happen |
+| Requires manual analysis | AI investigates autonomously |
+| Generic alerts | Prescribes the exact fix |
+| Separate disconnected tools | 9 modules in one platform |
+| Periodic reports | Real-time continuous monitoring |
+| Descriptive | Prescriptive + Predictive |
+
+**For a 3-minute walkthrough, see the auto-generated demo video:** `docs/auto-demo/output/final-demo.mp4`
 
 ---
 
-### 3. Agent Burnout Risk Score (`/burnout/risk`)
+## Table of Contents
 
-Scores agents 0-100 based on behavior patterns indicating burnout or attrition risk.
-
-**Endpoint:** `GET /burnout/risk`
-
-**Scoring Algorithm:**
-- **AHT Trend (0-30pts):** +20% week-over-week = 30pts, +10% = 20pts, +5% = 10pts
-- **Refusal Rate (0-25pts):** >15% = 25pts, >10% = 20pts, >5% = 10pts
-- **Volume Drop (0-25pts):** -30% contacts = 25pts, -20% = 15pts, -10% = 10pts
-- **Consistency/CV (0-20pts):** CV>0.4 = 20pts, CV>0.3 = 15pts, CV>0.2 = 10pts
-
-**Risk Levels:**
-- **High (≥60):** Urgent intervention required
-- **Medium (≥35):** Monitor and proactive check-in
-- **Low (<35):** Standard monitoring
-
-**Request Example:**
-```bash
-curl -H "X-Tenant-ID: tenant_abc123" \
-  http://localhost:8080/burnout/risk
-```
-
-**Response Example:**
-```json
-{
-  "generatedAt": "2026-07-16T18:30:00Z",
-  "summary": {
-    "totalAgents": 120,
-    "highRisk": 2,
-    "mediumRisk": 2,
-    "lowRisk": 116,
-    "avgRiskScore": 22
-  },
-  "agents": [
-    {
-      "name": "Sarah Johnson",
-      "riskScore": 78,
-      "riskLevel": "high",
-      "signals": [
-        {
-          "factor": "AHT Trend",
-          "detail": "+24% week-over-week",
-          "points": 30
-        },
-        {
-          "factor": "Refusal Rate",
-          "detail": "12% (was 4%)",
-          "points": 20
-        }
-      ],
-      "recommendation": "Schedule 1:1 check-in. Consider temporary skill reduction or schedule adjustment.",
-      "recentAht": 340.5,
-      "previousAht": 274.6,
-      "contactsThisWeek": 42,
-      "contactsLastWeek": 65
-    }
-  ]
-}
-```
-
-**Business Impact:** $840K/month in attrition prevention
+- [What It Does](#what-it-does)
+- [Tech Stack](#tech-stack)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Running the Application](#running-the-application)
+- [How to Use — Complete Tab Guide](#how-to-use--complete-tab-guide)
+- [Recommended Daily Workflow](#recommended-daily-workflow)
+- [API Reference](#api-reference)
+- [Architecture](#architecture)
+- [Project Structure](#project-structure)
+- [Configuration](#configuration)
+- [Key Algorithms](#key-algorithms)
+- [Demo Video Generator](#demo-video-generator)
+- [Troubleshooting](#troubleshooting)
+- [Design Decisions](#design-decisions)
+- [Contributing](#contributing)
 
 ---
 
-### 4. Real-time Anomaly Detection (`/anomaly/detect`)
+## What It Does
 
-Z-score analysis against 21-day baselines to detect volume surges, AHT spikes, and refusal clusters.
+InsightIQ provides **9 intelligent modules** in a single unified platform:
 
-**Endpoint:** `GET /anomaly/detect`
-
-**Algorithm:**
-- Baseline: Previous 21 days per metric per dimension
-- Recent window: Last 1 day
-- z-score = (recent - baseline_mean) / baseline_stddev
-- |z| ≥ 2.0 → warning anomaly
-- |z| ≥ 3.0 → critical anomaly
-
-**Detected Anomaly Types:**
-- **volume_surge / volume_drop**: Skill-level contact volume deviations
-- **aht_spike / aht_drop**: Skill-level handle time anomalies
-- **refusal_spike**: High agent refusal rates
-- **agent_aht_anomaly**: Individual agent behavior changes
-
-**Request Example:**
-```bash
-curl -H "X-Tenant-ID: tenant_abc123" \
-  http://localhost:8080/anomaly/detect
-```
-
-**Response Example:**
-```json
-{
-  "generatedAt": "2026-07-16T18:30:00Z",
-  "summary": {
-    "totalAnomalies": 5,
-    "critical": 2,
-    "warning": 3,
-    "dimensionsCovered": ["volume", "aht", "refusal", "agent_behavior"]
-  },
-  "anomalies": [
-    {
-      "id": "ANM-001",
-      "type": "volume_surge",
-      "severity": "critical",
-      "dimension": "volume",
-      "entity": "DP_LATAM_C_SPA",
-      "entityType": "skill",
-      "metric": "daily_contacts",
-      "currentValue": 2840,
-      "baselineMean": 1950.0,
-      "baselineStddev": 280.0,
-      "zScore": 3.18,
-      "deviation": "+46%",
-      "description": "Contact volume for DP_LATAM_C_SPA is 3.2 standard deviations above the 21-day average",
-      "impact": "Queue buildup likely — currently 58 contacts in queue",
-      "suggestedAction": "Activate overflow routing or reassign 4 proficient agents from DSS_MEX_Spa_Tech"
-    }
-  ]
-}
-```
-
-**Business Impact:** Early detection prevents cascade failures
+| # | Module | What It Does | Key Value |
+|---|--------|-------------|-----------|
+| 1 | **RCA Chat** | Natural language Q&A — ask anything about your contact center | Autonomous AI investigation |
+| 2 | **ROI Dashboard** | Quantifies savings across all optimization levers | CFO-ready budget justification |
+| 3 | **AI Briefing** | Daily AI-generated executive summary | Replaces 30-min morning standups |
+| 4 | **Forecast** | Predicts contact volume for next 4 hours | Proactive staffing before surges |
+| 5 | **Risk Monitor** | Real-time SLA health per skill + prescriptive fixes | Prevents service failures |
+| 6 | **Coaching** | Identifies which agents need training on which skills | Targeted, not generic |
+| 7 | **Burnout** | Behavioral risk scoring before agents quit | Prevents costly attrition |
+| 8 | **Anomaly** | Z-score detection of unusual patterns | Catches what humans miss |
+| 9 | **Simulator** | Erlang-C what-if staffing analysis | Test changes before executing |
+| 10 | **Shrinkage** | Idle time analysis with cost quantification | Visibility drives accountability |
+| 11 | **Deflection** | Identifies automation opportunities | Reduce volume, reduce cost |
+| 12 | **Agent View** | Individual agent performance dashboard | Side-by-side comparison |
 
 ---
 
-### 5. What-If Staffing Simulator (`/simulator/current-state` & `/simulator/simulate`)
+## Tech Stack
 
-Implements Erlang-C formula for SLA prediction when adding/removing agents.
-
-**Endpoints:**
-- `GET /simulator/current-state` - Current staffing levels and SLA
-- `POST /simulator/simulate` - Simulate agent reassignment impact
-
-**Erlang-C Algorithm:**
-```
-trafficIntensity = callsPerHour × (avgAHT / 3600)
-erlangC = probability of waiting in queue
-predictedSLA = 1 - erlangC × exp(-(agents - traffic) × (targetTime / AHT))
-```
-
-**Request Example (Current State):**
-```bash
-curl -H "X-Tenant-ID: tenant_abc123" \
-  http://localhost:8080/simulator/current-state
-```
-
-**Request Example (Simulation):**
-```bash
-curl -X POST -H "Content-Type: application/json" \
-  -H "X-Tenant-ID: tenant_abc123" \
-  -d '{
-    "targetAnswerTime": 30,
-    "changes": [
-      {"skillNo": 1042, "agentDelta": -2},
-      {"skillNo": 1078, "agentDelta": 2}
-    ]
-  }' \
-  http://localhost:8080/simulator/simulate
-```
-
-**Response Example:**
-```json
-{
-  "generatedAt": "2026-07-16T18:30:00Z",
-  "targetAnswerTime": 30,
-  "results": [
-    {
-      "skillName": "Billing",
-      "skillNo": 1042,
-      "before": {
-        "agents": 12,
-        "sla": 0.87,
-        "waitProbability": 0.42
-      },
-      "after": {
-        "agents": 10,
-        "sla": 0.73,
-        "waitProbability": 0.58
-      },
-      "impact": {
-        "slaDelta": -0.14,
-        "verdict": "SLA drops below threshold — NOT recommended"
-      }
-    }
-  ],
-  "netImpact": "Moving 2 agent(s): Billing SLA -14%, Technical SLA +12%.",
-  "recommendation": "Change would drop skills below 80% SLA — NOT recommended."
-}
-```
-
-**Business Impact:** Safe capacity planning prevents SLA breaches
+| Layer | Technology |
+|-------|-----------|
+| Backend | Java 17 · Spring Boot 3.3.4 |
+| AI Engine | AWS Bedrock · Claude (Converse API) · Multi-agent orchestration |
+| Data | Snowflake (read-only JDBC) · HikariCP connection pooling |
+| Frontend | Single-page HTML/JS · Tabbed interface · Chart.js visualizations |
+| Analytics | Z-score anomaly detection · Erlang-C queuing theory · Burnout risk scoring |
+| Build | Maven 3.9+ · JUnit 5 |
 
 ---
 
-### 6. Idle Time & Shrinkage Dashboard (`/shrinkage/analysis`)
+## Prerequisites
 
-Tracks productive vs non-productive time per agent with cost quantification.
+Before you begin, ensure you have:
 
-**Endpoint:** `GET /shrinkage/analysis`
+| Requirement | Version | Check Command |
+|-------------|---------|---------------|
+| Java | 17 or higher | `java -version` |
+| Maven | 3.9 or higher | `mvn -version` |
+| AWS CLI | 2.x (configured) | `aws sts get-caller-identity` |
+| Git | Any recent | `git --version` |
 
-**Assumptions:**
-- 8-hour shift
-- $25/hr cost per agent
-- 30% normal shrinkage threshold (breaks, training, admin)
+**AWS permissions required:** `bedrock:InvokeModel` on Claude model in `us-west-2`.
 
-**Request Example:**
+**Optional:** Snowflake read-only credentials. Without Snowflake, the app runs with realistic mock data (fully functional for demos).
+
+---
+
+## Installation
+
+### Step 1: Clone the Repository
+
 ```bash
-curl -H "X-Tenant-ID: tenant_abc123" \
-  http://localhost:8080/shrinkage/analysis
+git clone <repository-url>
+cd agentic-rca-sample
 ```
 
-**Business Impact:** $3.5M/month in recaptured idle time
+### Step 2: Configure Snowflake (Optional)
 
----
+Create `src/main/resources/application-dev.yaml`:
 
-### 7. Contact Deflection Opportunity Detector (`/deflection/opportunities`)
+```yaml
+snowflake:
+  jdbc-url: jdbc:snowflake://<account>.snowflakecomputing.com
+  username: <your-username>
+  password: <your-password>
+  warehouse: <warehouse-name>
+  database: <database-name>
+  schema: <schema-name>
+```
 
-Identifies automation-eligible contacts using multi-factor scoring.
+> **IMPORTANT:** This file contains credentials. It is gitignored and must NEVER be committed.
 
-**Endpoint:** `GET /deflection/opportunities`
+### Step 3: Build
 
-**Scoring Algorithm:**
-- **Volume (30%):** High-volume skills prioritized
-- **Simplicity (30%):** Low AHT indicates simple interactions
-- **Consistency (20%):** Low AHT variance = repeatable patterns
-- **Agent Breadth (20%):** Handled by many agents = standardized
-
-**Request Example:**
 ```bash
-curl -H "X-Tenant-ID: tenant_abc123" \
-  http://localhost:8080/deflection/opportunities
+mvn clean install
 ```
 
-**Business Impact:** Identifies $42K/month deflection opportunities
+This downloads all dependencies, compiles the code, and runs tests.
 
 ---
 
-### 8. ROI Cost Savings Dashboard (`/roi/summary`)
+## Running the Application
 
-Aggregates savings across all modules with dollar-value quantification.
+### Option A: With Snowflake (live data)
 
-**Endpoint:** `GET /roi/summary`
-
-**Savings Categories:**
-1. **Smart Overflow:** SLA breach prevention ($32K/mo)
-2. **Coaching Effectiveness:** AHT improvement ROI ($18.5K/mo)
-3. **Contact Deflection:** Automation savings ($42K/mo)
-4. **Shrinkage Recovery:** Idle time recapture ($15K/mo)
-5. **Attrition Prevention:** Turnover cost avoidance ($20K/mo)
-
-**Request Example:**
 ```bash
-curl -H "X-Tenant-ID: tenant_abc123" \
-  http://localhost:8080/roi/summary
+mvn spring-boot:run -Dspring-boot.run.profiles=dev
 ```
 
-**Response Example:**
-```json
-{
-  "generatedAt": "2026-07-16T18:30:00Z",
-  "period": "Last 7 days",
-  "totalMonthlySavings": "$127,500",
-  "totalAnnualSavings": "$1,530,000",
-  "roiBreakdown": [
-    {
-      "category": "Smart Overflow & Agent Assignment",
-      "icon": "🎯",
-      "monthlySavings": "$32,000",
-      "detail": "Prevented 640 SLA breaches by proactive agent reassignment",
-      "metric": "12 at-risk queues detected — queue depth reduced 45% faster"
-    }
-  ],
-  "keyMetrics": {
-    "totalContacts7d": 31500,
-    "totalAgents": 145,
-    "avgTeamAht": 285,
-    "slaComplianceRate": "87%",
-    "automationEligiblePct": "18%"
-  },
-  "vsBaseline": {
-    "ahtImprovement": "-12%",
-    "slaImprovement": "+5%",
-    "shrinkageReduction": "-8%",
-    "agentSatisfaction": "estimated +15% (reduced burnout)"
-  }
-}
-```
+### Option B: Without Snowflake (mock data — great for demos)
 
-**Business Impact:** $1.53M annual quantified savings for this tenant
-
----
-
-### 9. Supervisor AI Daily Briefing (`/briefing/today`)
-
-Uses AWS Bedrock (Claude) to generate personalized morning briefing from real Snowflake metrics.
-
-**Endpoint:** `GET /briefing/today`
-
-**Process:**
-1. Single SQL CTE query aggregates: yesterday's contacts, WoW change, top skills, SLA issues, agent AHT changes, queue depths
-2. Builds user prompt with structured metrics
-3. Calls Bedrock Converse API with system prompt: "You are a senior contact center operations advisor..."
-4. LLM returns structured JSON: headline, priorities, wins, risks, recommendation
-5. Falls back to template-based briefing if LLM fails
-
-**Request Example:**
-```bash
-curl -H "X-Tenant-ID: tenant_abc123" \
-  http://localhost:8080/briefing/today
-```
-
-**Response Example:**
-```json
-{
-  "generatedAt": "2026-07-16T18:30:00Z",
-  "briefing": {
-    "headline": "Contact volume up 12% — Billing queue needs immediate attention with 3 agents at burnout risk",
-    "priorities": [
-      {
-        "title": "Billing SLA at 73%",
-        "detail": "Queue depth 24, avg wait 4.2min. Consider overflow to General.",
-        "urgency": "critical"
-      },
-      {
-        "title": "3 agents showing burnout signals",
-        "detail": "Maria, David, Sarah have rising AHT + refusals this week.",
-        "urgency": "high"
-      }
-    ],
-    "wins": [
-      "Team AHT improved 8% vs last week",
-      "Zero SLA breaches on Technical_Support for 3 consecutive days"
-    ],
-    "risks": [
-      "Wednesday historically peaks at 15:00 — current staffing may be insufficient",
-      "Agent attrition risk: 2 agents have 50%+ shrinkage this week"
-    ],
-    "recommendation": "Reassign 3 agents from General_Support to Billing immediately — predicted to recover SLA from 73% to 86%."
-  },
-  "metrics": {
-    "yesterdayContacts": 4520,
-    "weekOverWeekChange": "+12%",
-    "activeAgents": 145,
-    "avgTeamAht": "4.2 min",
-    "topSkillByVolume": "DP_LATAM_C_SPA"
-  }
-}
-```
-
-**Business Impact:** Executive time savings + faster decision-making
-
----
-
-## Technology Stack
-
-### Backend
-- **Java 17** - Modern Java features (records, pattern matching, text blocks)
-- **Spring Boot 3.3.4** - REST framework, dependency injection, auto-configuration
-- **Spring Web** - REST controllers, exception handling, CORS
-
-### Data & Analytics
-- **Snowflake JDBC 3.24.2** - Real-time data warehouse queries
-- **HikariCP 6.0.0** - High-performance connection pooling
-- **Custom SnowflakeExecutor** - Tenant-scoped query execution layer
-
-### AI & ML
-- **AWS SDK for Java 2.28.11** - Bedrock runtime client
-- **AWS Bedrock** - Claude model via Converse API
-- **Custom BedrockHelper** - LLM prompt management and streaming
-
-### Search & Caching (Prepared for Production)
-- **OpenSearch Java Client 2.12.0** - Full-text search capabilities
-- **Jedis 5.1.0** - Redis/Valkey-compatible client for real-time queue state
-
-### Build & Test
-- **Maven 3.9+** - Dependency management, build lifecycle
-- **JUnit 5** - Unit testing framework
-- **Spring Boot Test** - Integration testing support
-
----
-
-## Setup Instructions
-
-### Prerequisites
-
-1. **Java 17 or higher**
-   ```bash
-   java -version
-   # Should output: openjdk version "17.0.x" or higher
-   ```
-
-2. **Maven 3.9+**
-   ```bash
-   mvn -version
-   # Should output: Apache Maven 3.9.x or higher
-   ```
-
-3. **AWS Credentials** (for Bedrock access)
-   - Federated role with `bedrock:InvokeModel` permission
-   - Configured via `~/.aws/credentials` or environment variables
-   - Default region: `us-west-2`
-
-4. **Snowflake Access** (optional - falls back to mock data)
-   - Read-only credentials for production analytics views
-   - JDBC URL, username, password
-
-### Installation
-
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd agentic-rca-sample
-   ```
-
-2. **Configure Snowflake credentials** (optional)
-
-   Create `src/main/resources/application-dev.yaml`:
-   ```yaml
-   snowflake:
-     jdbc-url: jdbc:snowflake://<account>.snowflakecomputing.com
-     username: <your-username>
-     password: <your-password>
-     warehouse: <warehouse-name>
-     database: <database-name>
-     schema: <schema-name>
-   ```
-
-   **IMPORTANT:** Add `application-dev.yaml` to `.gitignore` to prevent credential leaks!
-
-3. **Build the application**
-   ```bash
-   mvn clean install
-   ```
-
-### Running the Application
-
-**Option 1: Using Maven**
 ```bash
 mvn spring-boot:run
 ```
 
-**Option 2: Using the convenience script**
+### Option C: Using the convenience script
+
 ```bash
 ./run-dev.sh
 ```
 
-**Option 3: Run packaged JAR**
+### Option D: Packaged JAR
+
 ```bash
-mvn clean package
+mvn clean package -DskipTests
 java -jar target/agentic-rca-sample-0.1.0.jar
 ```
 
-The application starts on **http://localhost:8080**
+The application starts on **http://localhost:8080**. Open this URL in your browser.
 
-### Accessing the Platform
+### Verify It's Running
 
-1. **Web UI (Tabbed Interface)**
-   - Open browser to: http://localhost:8080
-   - Tabbed navigation for all 9 modules
-   - Real-time chart visualizations
+```bash
+curl http://localhost:8080/roi/summary
+```
 
-2. **REST API**
-   - Base URL: http://localhost:8080
-   - All endpoints accept `X-Tenant-ID` header for multi-tenant isolation
-   - Default tenant: `demo_tenant_001`
+You should get a JSON response with ROI data.
 
-### Configuration
+---
 
-**Application Properties** (`src/main/resources/application.yaml`):
+## How to Use — Complete Tab Guide
+
+Open http://localhost:8080 in your browser. The interface has a navigation bar with tabs for each module. Click any tab to switch.
+
+---
+
+### Tab 1: RCA Chat (Landing Page)
+
+**What it is:** A conversational AI interface where you ask questions about your contact center in plain English.
+
+**How to use:**
+1. Type your question in the chat input box at the bottom
+2. Click **Ask** or press Enter
+3. Wait 3-8 seconds — the AI investigates your question autonomously
+4. Read the structured response: findings, data, and recommendations
+
+**Example questions you can ask:**
+- "Which skills have the highest refusal rate?"
+- "Top agents by average handle time this week"
+- "Why is the billing queue building up?"
+- "Which agents are taking excessive breaks?"
+- "Compare performance of morning vs evening shifts"
+
+**What happens behind the scenes:**
+- AI parses your question
+- Orchestrates the right SQL queries against live data
+- Performs statistical analysis
+- Generates actionable recommendations
+
+**When to use:**
+- When something seems wrong and you want to understand why
+- When you have a specific operational question
+- When you want data-backed answers without building reports manually
+
+---
+
+### Tab 2: ROI Dashboard
+
+**What it is:** Shows the total dollar-value savings this platform generates, broken down by category.
+
+**How to use:**
+1. Click the **ROI** tab
+2. See the total annual savings figure at the top
+3. Scroll to see breakdown by category:
+   - Coaching optimization (reduced AHT through targeted training)
+   - Smart overflow (SLA breach prevention)
+   - Contact deflection (automation savings)
+   - Shrinkage reduction (idle time recovery)
+   - Attrition prevention (reduced turnover costs)
+4. View "vs Baseline" comparison showing improvement percentages
+
+**When to use:**
+- Executive presentations and budget reviews
+- Proving platform ROI to leadership
+- Monthly/quarterly business reporting
+- Comparing before vs after platform deployment
+
+---
+
+### Tab 3: AI Briefing
+
+**What it is:** A daily AI-generated executive summary of everything important in your contact center — like a morning newspaper.
+
+**How to use:**
+1. Click the **Briefing** tab
+2. Click the **Generate Briefing** button
+3. Wait 3-6 seconds for AI to analyze data and generate the briefing
+4. Read the output:
+   - **Headline:** One-sentence summary of the day's situation
+   - **Priorities:** Ranked list (Critical / High / Medium) with details
+   - **Wins:** Good news and improvements
+   - **Risks:** Emerging problems to watch
+   - **Top Recommendation:** Single most important action to take
+
+**When to use:**
+- First thing every morning to set daily priorities
+- Before management meetings for quick situational awareness
+- At shift handovers to brief incoming supervisors
+
+---
+
+### Tab 4: Forecast
+
+**What it is:** Predicts how many customer contacts you'll receive in the next 4 hours so you can plan staffing.
+
+**How to use:**
+1. Click the **Forecast** tab
+2. View the hourly prediction chart (predicted vs historical average)
+3. Check for **SURGE ALERT** badges — these warn of upcoming spikes
+4. Compare:
+   - **Predicted Volume** vs **Historical Average**
+   - **Current Agents** vs **Agents Needed**
+5. If understaffed for upcoming hours, prepare backup agents
+
+**Key indicators:**
+- Green = adequate staffing
+- Yellow = watch closely
+- Red = understaffed, action needed
+
+**When to use:**
+- Planning lunch breaks and shift schedules
+- Deciding when to call in backup agents
+- Preparing for busy periods before queues build
+
+---
+
+### Tab 5: Risk Monitor
+
+**What it is:** Real-time dashboard showing which skills (departments) are at risk of not meeting SLA goals.
+
+**How to use:**
+1. Click the **Risk** tab
+2. View skill cards colour-coded by health:
+   - **Green:** On target, healthy
+   - **Yellow:** Watch — trending toward risk
+   - **Red:** At risk — immediate attention needed
+3. For at-risk skills, scroll down to **Smart Overflow** recommendations
+4. See exactly:
+   - Which proficient agents to move
+   - Their AHT scores and proficiency ratings
+   - Predicted queue depth reduction after the move
+
+**What makes it powerful:** It doesn't just flag problems — it prescribes the exact fix with predicted impact.
+
+**When to use:**
+- Throughout the day during busy periods
+- Whenever you see queues building
+- Before and after making staffing changes
+
+---
+
+### Tab 6: Coaching
+
+**What it is:** Identifies agents who need coaching and tells you exactly which skills they're struggling with.
+
+**How to use:**
+1. Click the **Coaching** tab
+2. View the agent list sorted by coaching priority
+3. For each agent, see:
+   - **Lagging Skills:** Which skills they're slow on
+   - **Gap Ratio:** How much slower than team average (e.g., 3.2x = 3.2 times slower)
+   - **Contacts Handled:** Volume context
+4. Use the recommendations to plan targeted coaching sessions
+
+**Key concept — Gap Ratio:**
+- 1.0x = performing at team average
+- 2.0x = twice as slow as team average
+- 3.0x+ = significantly below average, priority coaching needed
+
+**When to use:**
+- Planning weekly coaching sessions
+- Performance reviews
+- Identifying training needs for specific skills
+- Measuring coaching effectiveness over time
+
+---
+
+### Tab 7: Burnout
+
+**What it is:** Detects agents at risk of burnout before they quit or go on sick leave.
+
+**How to use:**
+1. Click the **Burnout** tab
+2. View agents sorted by risk score (highest first)
+3. Risk levels:
+   - **High (60-100):** Urgent intervention needed
+   - **Medium (35-59):** Monitor closely, schedule check-in
+   - **Low (0-34):** Standard monitoring
+4. For high-risk agents, check warning signals:
+   - Rising handle times (stress indicator)
+   - High refusal rates (frustration indicator)
+   - Volume drops (disengagement indicator)
+   - Excessive overtime (fatigue indicator)
+5. Follow the AI recommendation for each agent
+
+**When to use:**
+- Weekly wellness checks
+- Preventing agent turnover (each departure costs thousands)
+- Planning workload redistribution
+- Early intervention before performance collapses
+
+---
+
+### Tab 8: Anomaly
+
+**What it is:** Automatically detects unusual patterns or sudden changes in metrics that might indicate problems.
+
+**How to use:**
+1. Click the **Anomaly** tab
+2. View detected anomalies sorted by severity:
+   - **Critical (z-score 3+):** Very unusual, immediate attention
+   - **Warning (z-score 2-3):** Notable deviation, investigate
+3. For each anomaly, see:
+   - **Entity:** Which skill or agent is affected
+   - **Current Value** vs **Baseline** (21-day average)
+   - **Z-Score:** How many standard deviations from normal
+   - **Deviation %:** How far off from expected
+   - **Suggested Action:** What to do about it
+
+**Key concept — Z-Score:**
+- 2.0 = unusual (happens ~5% of the time normally)
+- 3.0 = very unusual (happens ~0.3% of the time)
+- 4.0+ = extremely unusual, almost certainly a real issue
+
+**When to use:**
+- Catching problems as they start (before they cascade)
+- Finding hidden issues you didn't know to look for
+- Emergency detection and rapid response
+- Validating whether a suspected problem is statistically real
+
+---
+
+### Tab 9: Simulator
+
+**What it is:** A "what-if" tool that lets you test staffing changes mathematically before making them in real life.
+
+**How to use:**
+1. Click the **Simulator** tab
+2. View **Current State:** agents per skill, current SLA percentage
+3. Enter your scenario:
+   - Select source skill (move agents FROM)
+   - Select target skill (move agents TO)
+   - Enter number of agents to move
+4. Click **Simulate**
+5. View predicted results:
+   - SLA before and after for both skills
+   - Whether the change is recommended or not
+   - Net impact assessment
+
+**Example:** "What if I move 3 agents from Billing to Technical Support?"
+- Billing: 92% SLA → 85% SLA (acceptable drop)
+- Technical: 65% SLA → 88% SLA (significant improvement)
+- Verdict: Safe move, recommended
+
+**When to use:**
+- Before making any staffing changes
+- Testing multiple scenarios to find optimal configuration
+- Understanding trade-offs between skills
+- Justifying staffing decisions with data
+
+---
+
+### Tab 10: Shrinkage
+
+**What it is:** Identifies agents who are spending excessive time not handling contacts and calculates the cost impact.
+
+**How to use:**
+1. Click the **Shrinkage** tab
+2. View agents sorted by shrinkage rate (highest first)
+3. For each flagged agent, see:
+   - **Shrinkage Rate:** Percentage of paid time NOT on contacts
+   - **Level:** Normal / High / Excessive
+   - **Cost Impact:** Dollar amount per agent per week in wasted labour
+   - **Flags:** Long breaks, excessive training time, low utilization
+4. Normal shrinkage is ~30% (breaks, training, admin). Above 50% = needs review.
+
+**When to use:**
+- Reducing labour costs
+- Improving agent productivity
+- Finding scheduling inefficiencies
+- Accountability conversations with evidence
+
+---
+
+### Tab 11: Deflection
+
+**What it is:** Finds contacts that could be handled by automation (IVR, chatbot, self-service portal) instead of live agents.
+
+**How to use:**
+1. Click the **Deflection** tab
+2. View automation opportunities ranked by savings potential
+3. For each opportunity, see:
+   - **Contact Type:** What kind of contacts (e.g., password resets)
+   - **Volume:** How many contacts per period
+   - **Avg Handle Time:** How long agents spend on these
+   - **Deflection Score (0-100):** How automatable it is
+   - **Projected Savings:** Monthly and annual dollar figures
+4. High-score, high-volume items are your best automation targets
+
+**When to use:**
+- Planning automation roadmap
+- Building business cases for chatbot/IVR investment
+- Reducing overall contact volume
+- Quarterly strategic planning
+
+---
+
+### Tab 12: Agent View
+
+**What it is:** A performance dashboard showing detailed metrics for all individual agents.
+
+**How to use:**
+1. Click the **Agents** tab
+2. View the team summary: total agents, team average AHT, team SLA
+3. Browse individual agents with:
+   - **Performance Rating:** Good / Average / Critical
+   - **Contacts Handled:** Volume
+   - **Handle Time:** Total time per contact
+   - **Talk Time:** Actual conversation time
+   - **Hold Time:** Customer on hold
+   - **After-Call Work (ACW):** Post-contact administration
+   - **SLA:** Individual service level
+4. Sort and filter to find outliers
+
+**When to use:**
+- Performance reviews and comparisons
+- Finding top performers to mentor others
+- Identifying agents needing support
+- Team-level metrics reporting
+
+---
+
+## Recommended Daily Workflow
+
+| Time of Day | What to Do | Tab to Use |
+|-------------|-----------|------------|
+| Start of day | Check AI briefing for priorities | Briefing |
+| Morning | Review which skills are at risk | Risk Monitor |
+| Throughout day | Watch for volume surges | Forecast |
+| When problems arise | Ask AI to investigate | RCA Chat |
+| Before any staffing change | Test it mathematically | Simulator |
+| Weekly | Plan coaching sessions | Coaching |
+| Weekly | Check agent wellness | Burnout |
+| Monthly | Report business value | ROI |
+| When alerts fire | Investigate anomalies | Anomaly |
+| Quarterly | Plan automation roadmap | Deflection + Shrinkage |
+
+**Tips for best results:**
+1. Check Briefing first thing every morning — it sets your priorities
+2. Keep Risk Monitor open during busy periods — catch problems early
+3. Always use Simulator before making staffing changes — test safely
+4. Ask RCA Chat specific questions — the more specific, the better the answer
+5. Use Forecast to plan breaks — schedule them during predicted slow periods
+6. Review Coaching weekly for consistent improvement
+7. Check Burnout monthly — preventing one departure saves thousands
+
+---
+
+## API Reference
+
+All endpoints are REST (GET/POST) and return JSON. All accept an optional `X-Tenant-ID` header for multi-tenant isolation.
+
+### Endpoints
+
+| Endpoint | Method | Description | Typical Response Time |
+|----------|--------|-------------|----------------------|
+| `/` | GET | Web UI (tabbed interface) | Instant |
+| `/risk/overflow/recommendations` | GET | Smart overflow recommendations | 2-4s |
+| `/forecast/demand` | GET | 4-hour volume forecast | 1-2s |
+| `/burnout/risk` | GET | Agent burnout risk scores | 2-3s |
+| `/anomaly/detect` | GET | Real-time anomaly detection | 3-5s |
+| `/simulator/current-state` | GET | Current staffing state | ~1s |
+| `/simulator/simulate` | POST | What-if staffing simulation | ~1s |
+| `/shrinkage/analysis` | GET | Idle time analysis | ~2s |
+| `/deflection/opportunities` | GET | Deflection opportunities | ~2s |
+| `/roi/summary` | GET | ROI dashboard | 2-3s |
+| `/briefing/today` | GET | AI daily briefing | 3-6s |
+
+### Example API Calls
+
+```bash
+# Get ROI summary
+curl http://localhost:8080/roi/summary
+
+# Get forecast
+curl http://localhost:8080/forecast/demand
+
+# Get burnout risk scores
+curl http://localhost:8080/burnout/risk
+
+# Get anomalies
+curl http://localhost:8080/anomaly/detect
+
+# Get daily briefing
+curl http://localhost:8080/briefing/today
+
+# Simulate moving 3 agents
+curl -X POST http://localhost:8080/simulator/simulate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "targetAnswerTime": 30,
+    "changes": [
+      {"skillNo": 1042, "agentDelta": -3},
+      {"skillNo": 1078, "agentDelta": 3}
+    ]
+  }'
+```
+
+### Error Handling
+
+- If Snowflake is unavailable → returns realistic mock data (no errors to clients)
+- If Bedrock is unavailable → returns template-based responses
+- No endpoint should ever return 500 to end users
+
+---
+
+## Architecture
+
+```
+┌──────────────────────────────────────────────────────────┐
+│              InsightIQ Frontend (HTML/JS SPA)             │
+│        12 Tabs · Real-time Charts · Responsive UI        │
+└────────────────────────────┬─────────────────────────────┘
+                             │ REST API (JSON)
+┌────────────────────────────┴─────────────────────────────┐
+│               Spring Boot 3.3 Application                 │
+│                                                           │
+│  ┌─────────────────────────────────────────────────────┐ │
+│  │  9 AI Modules (Controller + Service per module)     │ │
+│  │  Each module: REST endpoint → query → analyze →     │ │
+│  │  optional LLM enrichment → JSON response            │ │
+│  └─────────────────────────────────────────────────────┘ │
+│                                                           │
+│  ┌─────────────────────────────────────────────────────┐ │
+│  │  Shared Infrastructure                              │ │
+│  │  • TenantContext — multi-tenant isolation           │ │
+│  │  • SnowflakeExecutor — read-only query layer       │ │
+│  │  • BedrockHelper — LLM prompt + response mgmt      │ │
+│  │  • GlobalExceptionHandler — graceful fallbacks      │ │
+│  └─────────────────────────────────────────────────────┘ │
+└──────────┬────────────────────────────────┬──────────────┘
+           │                                │
+  ┌────────▼────────┐            ┌─────────▼─────────┐
+  │  Snowflake DB   │            │   AWS Bedrock     │
+  │  (Read-only)    │            │   Claude LLM      │
+  │  JDBC + Views   │            │   Converse API    │
+  └─────────────────┘            └───────────────────┘
+```
+
+### Data Flow
+
+1. User interacts with frontend (clicks tab, asks question)
+2. Frontend calls REST API endpoint
+3. TenantContext resolves multi-tenant isolation from headers
+4. SnowflakeExecutor runs tenant-scoped SQL queries (read-only)
+5. Module-specific analytics logic processes the data
+6. BedrockHelper enriches with AI-generated insights (optional)
+7. Structured JSON response returned to frontend
+8. Frontend renders charts, tables, and recommendations
+9. If any external system is down → graceful fallback to mock data
+
+---
+
+## Project Structure
+
+```
+agentic-rca-sample/
+├── src/
+│   ├── main/
+│   │   ├── java/com/nice/agentic/
+│   │   │   ├── AgenticRcaApplication.java     # Entry point
+│   │   │   ├── TenantContext.java             # Multi-tenant isolation
+│   │   │   ├── BedrockConfig.java             # AWS client configuration
+│   │   │   ├── BedrockHelper.java             # LLM orchestration
+│   │   │   ├── GlobalExceptionHandler.java    # Error handling
+│   │   │   ├── anomaly/                        # Anomaly detection module
+│   │   │   ├── briefing/                       # AI daily briefing module
+│   │   │   ├── burnout/                        # Burnout risk scoring module
+│   │   │   ├── deflection/                     # Contact deflection module
+│   │   │   ├── forecast/                       # Demand forecasting module
+│   │   │   ├── query/                          # SnowflakeExecutor
+│   │   │   ├── risk/                           # Smart overflow module
+│   │   │   ├── roi/                            # ROI dashboard module
+│   │   │   ├── shrinkage/                      # Shrinkage analysis module
+│   │   │   ├── simulator/                      # Erlang-C simulator module
+│   │   │   └── tools/                          # RCA agent tools
+│   │   └── resources/
+│   │       ├── static/index.html              # Frontend UI (all-in-one)
+│   │       ├── application.yaml               # Default config
+│   │       ├── application-dev.yaml           # Dev config (gitignored)
+│   │       └── prompts/                        # LLM system prompts
+│   └── test/                                   # Unit & integration tests
+├── docs/
+│   ├── auto-demo/                              # Automated video generator
+│   ├── DEMO_3MIN.md                           # 3-minute demo script
+│   └── VIDEO_RECORDING_GUIDE.md               # Recording instructions
+├── pom.xml                                     # Maven dependencies
+├── run-dev.sh                                  # Convenience run script
+└── README.md                                   # This file
+```
+
+---
+
+## Configuration
+
+### Main Config (`application.yaml`)
 
 ```yaml
 server:
@@ -659,320 +686,126 @@ agentic:
     region: us-west-2
     max-tokens: 4096
     temperature: 0.3
-
-spring:
-  application:
-    name: agentic-rca-sample
 ```
 
-**Multi-Tenant Configuration:**
+### Environment Variables (Production)
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `SNOWFLAKE_JDBC_URL` | Optional | Snowflake JDBC connection string |
+| `SNOWFLAKE_USERNAME` | Optional | Snowflake service account |
+| `SNOWFLAKE_PASSWORD` | Optional | Snowflake password |
+| `AWS_REGION` | Yes | AWS region (default: us-west-2) |
+| `SERVER_PORT` | No | Server port (default: 8080) |
+
+### Multi-Tenant Support
+
 - Tenant ID extracted from `X-Tenant-ID` header or `tenantId` query parameter
-- Default tenant: `demo_tenant_001`
-- All Snowflake queries scoped by `_TENANT_ID` column
+- All database queries automatically scoped by tenant
+- Each tenant sees only their own data
 
 ---
 
-## API Documentation
+## Key Algorithms
 
-### Global Headers
+### Burnout Risk Scoring (0-100 points)
 
-All endpoints accept the following optional header:
-```
-X-Tenant-ID: <tenant-identifier>
-```
+| Factor | Points | Threshold |
+|--------|--------|-----------|
+| AHT Trend | 0-30 | +20% WoW = 30pts, +10% = 20pts, +5% = 10pts |
+| Refusal Rate | 0-25 | >15% = 25pts, >10% = 20pts, >5% = 10pts |
+| Volume Drop | 0-25 | -30% = 25pts, -20% = 15pts, -10% = 10pts |
+| Consistency (CV) | 0-20 | CV>0.4 = 20pts, CV>0.3 = 15pts |
 
-### Endpoints Summary
+### Anomaly Detection (Z-Score)
 
-| Endpoint | Method | Description | Response Time |
-|----------|--------|-------------|---------------|
-| `/risk/overflow/recommendations` | GET | Smart overflow agent recommendations | ~2-4s |
-| `/forecast/demand` | GET | 4-hour contact volume forecast | ~1-2s |
-| `/burnout/risk` | GET | Agent burnout risk scores | ~2-3s |
-| `/anomaly/detect` | GET | Real-time anomaly detection | ~3-5s |
-| `/simulator/current-state` | GET | Current staffing state | ~1s |
-| `/simulator/simulate` | POST | What-if staffing simulation | ~1s |
-| `/shrinkage/analysis` | GET | Idle time analysis | ~2s |
-| `/deflection/opportunities` | GET | Contact deflection opportunities | ~2s |
-| `/roi/summary` | GET | ROI dashboard | ~2-3s |
-| `/briefing/today` | GET | AI-generated daily briefing | ~3-6s |
+- **Baseline:** 21-day rolling average per metric per entity
+- **Z-score formula:** `z = (current_value - mean) / standard_deviation`
+- **Severity:** |z| >= 2.0 (warning), |z| >= 3.0 (critical)
+- **Dimensions:** volume, AHT, refusals, agent behavior
 
-### Error Handling
+### Erlang-C Staffing Simulator
 
-All endpoints return graceful error responses:
+- **Traffic intensity:** `A = calls_per_hour × (avg_AHT / 3600)`
+- **Wait probability:** Erlang-C formula (iterative calculation)
+- **Predicted SLA:** `SLA = 1 - P(wait) × exp(-(agents - A) × (target_time / AHT))`
+- Enables mathematical "what-if" staffing decisions
 
-```json
-{
-  "timestamp": "2026-07-16T18:30:00Z",
-  "status": 500,
-  "error": "Internal Server Error",
-  "message": "Snowflake connection timeout",
-  "path": "/risk/overflow/recommendations"
-}
-```
+### Contact Deflection Scoring (0-100)
 
-**Fallback Strategy:**
-- If Snowflake unavailable → Returns realistic mock data
-- If Bedrock unavailable → Returns template-based responses
-- No endpoint throws 500 errors to clients
+| Factor | Weight | Logic |
+|--------|--------|-------|
+| Volume | 30% | Higher volume = higher priority |
+| Simplicity | 30% | Lower AHT = simpler = more automatable |
+| Consistency | 20% | Low AHT variance = repeatable pattern |
+| Agent Breadth | 20% | Many agents handle it = standardized process |
 
 ---
 
-## Database Schema
+## Demo Video Generator
 
-### Snowflake Views Used
+An automated tool creates a fully synced screen recording with AI voiceover.
 
-**1. AGENT_CONTACT_FACT_VIEW_V011**
-- Primary fact table for all contact interactions
-- Key columns:
-  - `_TENANT_ID` - Multi-tenant isolation
-  - `USER_ID` - Agent identifier
-  - `SKILL_NO` - Skill/queue identifier
-  - `HANDLE_SECONDS` - Contact duration (AHT)
-  - `IS_REFUSED_FLAG` - Agent refused the contact
-  - `START_TIMESTAMP` - Contact start time
-  - `END_TIMESTAMP` - Contact end time (NULL if in-progress)
-
-**2. USER_DIM_VIEW_V001**
-- Agent dimension table
-- Key columns:
-  - `USER_ID` - Agent identifier
-  - `USER_FIRST_NAME`, `USER_LAST_NAME` - Agent name
-  - `_TENANT_ID` - Multi-tenant isolation
-
-**3. SKILL_SCD_DIM_VIEW_V001**
-- Skill/queue dimension (Slowly Changing Dimension)
-- Key columns:
-  - `SKILL_NO` - Skill identifier
-  - `SKILL_NAME` - Skill display name
-  - `_TENANT_ID` - Multi-tenant isolation
-
-**Deduplication Pattern:**
-```sql
-SELECT SKILL_NO, MAX(SKILL_NAME) AS SKILL_NAME
-FROM SKILL_SCD_DIM_VIEW_V001
-WHERE _TENANT_ID = '<tenant>'
-GROUP BY SKILL_NO
-```
-
----
-
-## Development
-
-### Project Structure
-
-```
-agentic-rca-sample/
-├── src/
-│   ├── main/
-│   │   ├── java/com/nice/agentic/
-│   │   │   ├── AgenticRcaApplication.java      # Main application
-│   │   │   ├── TenantContext.java              # Multi-tenant context
-│   │   │   ├── BedrockConfig.java              # AWS Bedrock client
-│   │   │   ├── BedrockHelper.java              # LLM utilities
-│   │   │   ├── GlobalExceptionHandler.java     # Error handling
-│   │   │   ├── anomaly/                         # Anomaly detection module
-│   │   │   ├── briefing/                        # AI daily briefing module
-│   │   │   ├── burnout/                         # Burnout risk module
-│   │   │   ├── deflection/                      # Contact deflection module
-│   │   │   ├── forecast/                        # Demand forecasting module
-│   │   │   ├── query/                           # SnowflakeExecutor
-│   │   │   ├── risk/                            # Smart overflow module
-│   │   │   ├── roi/                             # ROI dashboard module
-│   │   │   ├── shrinkage/                       # Shrinkage analysis module
-│   │   │   ├── simulator/                       # Staffing simulator module
-│   │   │   └── tools/                           # RCA agent tools
-│   │   └── resources/
-│   │       ├── application.yaml                 # Main config
-│   │       ├── application-dev.yaml             # Dev config (gitignored)
-│   │       ├── prompts/                         # LLM system prompts
-│   │       ├── schema-columns.json              # Snowflake schema metadata
-│   │       └── static/                          # Frontend HTML/JS
-│   └── test/                                    # Unit & integration tests
-├── docs/
-│   └── diagrams/                                # Architecture diagrams
-├── pom.xml                                      # Maven dependencies
-├── run-dev.sh                                   # Convenience run script
-└── README.md                                    # This file
-```
-
-### Adding a New Module
-
-1. Create package: `src/main/java/com/nice/agentic/<module>/`
-2. Create controller: `<Module>Controller.java` with `@RestController`
-3. Inject `SnowflakeExecutor` and `TenantContext`
-4. Implement endpoint with fallback to mock data:
-   ```java
-   @GetMapping("/mymodule/endpoint")
-   public Map<String, Object> endpoint() {
-       if (!snowflakeExecutor.isConfigured()) {
-           return buildMockResponse();
-       }
-       try {
-           return buildLiveResponse();
-       } catch (Exception e) {
-           return buildMockResponse();
-       }
-   }
-   ```
-5. Add tab to `src/main/resources/static/index.html`
-
-### Testing
-
-**Run all tests:**
 ```bash
-mvn test
+cd docs/auto-demo
+npm install
+node generate-demo.js
 ```
 
-**Run specific test:**
-```bash
-mvn test -Dtest=CoachControllerTest
-```
+**Output:** `docs/auto-demo/output/final-demo.mp4` (~3.3 minutes, ~15 MB)
 
-**Integration testing:**
-- Tests use mock Snowflake executor by default
-- Set environment variables for live integration tests:
-  ```bash
-  export SNOWFLAKE_JDBC_URL=<url>
-  export SNOWFLAKE_USERNAME=<user>
-  export SNOWFLAKE_PASSWORD=<pass>
-  mvn test
-  ```
+See [docs/auto-demo/README.md](docs/auto-demo/README.md) for customization options (voice, zoom, pacing).
 
 ---
 
-## Deployment
+## Troubleshooting
 
-### Production Checklist
-
-- [ ] Configure HikariCP connection pooling (currently wired but not active)
-- [ ] Enable OpenSearch integration for full-text search
-- [ ] Configure Valkey/Redis for real-time queue state caching
-- [ ] Set up application monitoring (CloudWatch, Datadog)
-- [ ] Configure SSL/TLS for HTTPS endpoints
-- [ ] Implement API rate limiting and authentication
-- [ ] Enable query result caching for expensive analytics
-- [ ] Set up automated backups for configuration
-- [ ] Configure CORS for production frontend domains
-- [ ] Enable Spring Actuator for health checks
-
-### Environment Variables
-
-**Required for Production:**
-```bash
-SNOWFLAKE_JDBC_URL=jdbc:snowflake://<account>.snowflakecomputing.com
-SNOWFLAKE_USERNAME=<service-account>
-SNOWFLAKE_PASSWORD=<secure-password>
-AWS_REGION=us-west-2
-BEDROCK_MODEL_ID=us.anthropic.claude-sonnet-4-5-20250929-v1:0
-```
-
-**Optional:**
-```bash
-SERVER_PORT=8080
-SPRING_PROFILES_ACTIVE=production
-```
+| Problem | Cause | Solution |
+|---------|-------|----------|
+| App won't start | Missing Java 17 | Install JDK 17: `brew install openjdk@17` |
+| "Snowflake is not configured" | No dev profile | Run with: `mvn spring-boot:run -Dspring-boot.run.profiles=dev` |
+| Briefing shows error | Bedrock not accessible | Check AWS credentials: `aws sts get-caller-identity` |
+| Tabs show "Loading..." | Backend not responding | Ensure app is running on port 8080 |
+| Mock data shown | Snowflake unreachable | Check `application-dev.yaml` credentials |
+| Port 8080 in use | Another process | Kill it: `lsof -ti:8080 \| xargs kill` or change port |
+| Build fails | Dependencies missing | Run: `mvn clean install -U` |
+| Slow responses (>10s) | Snowflake cold start | Wait for warehouse auto-resume, retry |
+| RCA Chat no response | Bedrock timeout | Check AWS region, model ID, and permissions |
 
 ---
 
-## Architecture Decisions
+## Design Decisions
 
-### Why Snowflake Read-Only?
-
-- Zero risk of data corruption
-- Simplifies security audit
-- Enables aggressive caching strategies
-- Aligns with analytics workload pattern
-
-### Why Mock Data Fallback?
-
-- Resilience: Platform remains functional during outages
-- Development: Engineers can run locally without Snowflake access
-- Demos: Sales and customer success can demonstrate features without credentials
-- Testing: Unit tests don't require external dependencies
-
-### Why Erlang-C for Staffing?
-
-- Industry-standard queueing theory model
-- Accurate for contact center workloads (Poisson arrival, exponential service)
-- Enables What-If simulation without historical A/B tests
-- Aligns with WFM best practices
-
-### Why Z-Score for Anomaly Detection?
-
-- Statistically rigorous (confidence intervals)
-- Computationally efficient (single-pass aggregation)
-- Interpretable for non-technical users ("3 standard deviations")
-- Adaptive to tenant-specific baselines
+| Decision | Why |
+|----------|-----|
+| **Read-only Snowflake** | Zero data corruption risk, simplified security audit |
+| **Mock data fallback** | App always works — during outages, for local dev, for demos |
+| **Erlang-C for staffing** | Industry-standard WFM model, mathematically rigorous |
+| **Z-score for anomalies** | Statistically sound, adaptive to tenant baselines, interpretable |
+| **Single HTML frontend** | Zero build step, instant deployment, no framework dependency |
+| **Per-module packages** | Independent development, clear ownership, easy to add new modules |
+| **Multi-tenant isolation** | Enterprise-ready from day one, tenant data never leaks |
+| **Graceful degradation** | No module depends on another — partial failures don't cascade |
 
 ---
 
 ## Contributing
 
-This is a demonstration project for a sparkathon submission. Internal contributions welcome via pull requests.
+Internal contributions welcome via pull requests.
 
-### Code Standards
-
-- Follow Google Java Style Guide
+**Code standards:**
+- Google Java Style Guide
 - Maximum line length: 120 characters
-- Use `@slf4j` for logging
-- All public methods must have Javadoc
-- Controllers return `Map<String, Object>` for JSON responses
+- Each module is self-contained in its own package
+- Controllers return `Map<String, Object>` for JSON flexibility
+- All endpoints must handle Snowflake-unavailable gracefully
 
 ---
 
 ## License
 
-Internal use only - NICE Ltd.
+Internal use only — NICE Ltd.
 
 ---
 
-## Contact
-
-For questions or issues, contact the Babelfish Team - Agentic Platform.
-
----
-
-## Appendix: Sample Queries
-
-### Get All Analytics for a Tenant
-
-```bash
-TENANT="tenant_abc123"
-
-# Smart Overflow
-curl -H "X-Tenant-ID: $TENANT" http://localhost:8080/risk/overflow/recommendations
-
-# Demand Forecast
-curl -H "X-Tenant-ID: $TENANT" http://localhost:8080/forecast/demand
-
-# Burnout Risk
-curl -H "X-Tenant-ID: $TENANT" http://localhost:8080/burnout/risk
-
-# Anomaly Detection
-curl -H "X-Tenant-ID: $TENANT" http://localhost:8080/anomaly/detect
-
-# ROI Summary
-curl -H "X-Tenant-ID: $TENANT" http://localhost:8080/roi/summary
-
-# Daily Briefing
-curl -H "X-Tenant-ID: $TENANT" http://localhost:8080/briefing/today
-```
-
-### Simulate Agent Reassignment
-
-```bash
-curl -X POST http://localhost:8080/simulator/simulate \
-  -H "Content-Type: application/json" \
-  -H "X-Tenant-ID: tenant_abc123" \
-  -d '{
-    "targetAnswerTime": 30,
-    "changes": [
-      {"skillNo": 1042, "agentDelta": -3},
-      {"skillNo": 1078, "agentDelta": 3}
-    ]
-  }'
-```
-
----
-
-**Built with Claude on AWS Bedrock | Powered by Snowflake | Engineered for Scale**
+**Built for Sparkathon | Babelfish Team | Agentic Platform**
