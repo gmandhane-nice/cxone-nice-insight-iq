@@ -224,6 +224,33 @@
   .loading-row td { color: var(--text-muted); text-align: center; padding: 40px; }
   .empty-state { text-align: center; padding: 40px; color: var(--text-muted); font-size: 14px; }
 
+  /* Gap pills for coaching */
+  .gap-pill {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    margin: 2px 4px 2px 0;
+    white-space: nowrap;
+  }
+  .gap-pill-red { background: rgba(224,82,82,0.2); color: var(--badge-at-risk); }
+  .gap-pill-orange { background: rgba(224,160,64,0.2); color: var(--badge-warning); }
+  .gap-pill-yellow { background: rgba(224,200,64,0.2); color: #e0c840; }
+  .skill-gap-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+  .training-btn {
+    padding: 6px 14px;
+    background: rgba(47,111,235,0.12);
+    border: 1px solid rgba(47,111,235,0.4);
+    border-radius: 6px;
+    color: #7bb0ff;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .training-btn:hover { background: rgba(47,111,235,0.25); border-color: var(--accent-blue); }
+
   /* SLA bar */
   .sla-cell { min-width: 110px; }
   .sla-bar-wrap { display: flex; align-items: center; gap: 8px; }
@@ -394,6 +421,7 @@
     <button class="active" onclick="switchTab('chat', this)">RCA Chat</button>
     <button onclick="switchTab('risk', this)">Risk Monitor</button>
     <button onclick="switchTab('agent', this)">Agent View</button>
+    <button onclick="switchTab('coaching', this)">Coaching</button>
   </nav>
 </header>
 
@@ -488,6 +516,40 @@
         </tbody>
       </table>
     </div>
+  </section>
+
+  <!-- ============ COACHING PANEL ============ -->
+  <section id="panel-coaching" class="panel">
+    <div class="risk-header">
+      <h2>Agent Coaching — Skill Gap Analysis</h2>
+      <div style="display:flex;align-items:center;gap:12px;">
+        <span class="last-updated" id="coachingLastUpdated"></span>
+        <button class="refresh-btn" onclick="coachingLoad()">Refresh</button>
+      </div>
+    </div>
+
+    <!-- KPI Summary Cards -->
+    <div class="kpi-grid" id="coachingKpiGrid">
+      <div class="kpi-card"><div class="kpi-value">--</div><div class="kpi-label">Agents Needing Coaching</div></div>
+      <div class="kpi-card"><div class="kpi-value">--</div><div class="kpi-label">Skills with Gaps</div></div>
+      <div class="kpi-card"><div class="kpi-value">--</div><div class="kpi-label">Avg Gap Ratio</div></div>
+    </div>
+
+    <!-- Coaching Table -->
+    <table class="risk-table" id="coachingTable">
+      <thead>
+        <tr>
+          <th>Agent Name</th>
+          <th>Lagging Skills</th>
+          <th>Contacts</th>
+          <th>Recommendation</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody id="coachingTableBody">
+        <tr class="loading-row"><td colspan="5">Loading coaching data&hellip;</td></tr>
+      </tbody>
+    </table>
   </section>
 
 </main>
@@ -1243,6 +1305,109 @@ function agentRenderTable(agents) {
   const agentBtn = document.querySelectorAll('nav button')[2];
   agentBtn.addEventListener('click', function() {
     if (!agentDataLoaded) agentLoad();
+  });
+})();
+
+/* ============================================================
+   COACHING — SKILL GAP ANALYSIS
+   ============================================================ */
+let coachingDataLoaded = false;
+
+function coachingLoad() {
+  const tbody = document.getElementById('coachingTableBody');
+  tbody.innerHTML = '<tr class="loading-row"><td colspan="5">Loading coaching data&hellip;</td></tr>';
+
+  fetch('/coaching/gaps')
+    .then(r => {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    })
+    .then(data => {
+      coachingRenderKpis(data);
+      coachingRenderTable(data.agents || []);
+      document.getElementById('coachingLastUpdated').textContent = 'Last updated: ' + new Date().toLocaleTimeString();
+      coachingDataLoaded = true;
+    })
+    .catch(err => {
+      tbody.innerHTML = '<tr class="loading-row"><td colspan="5" style="color:#e05252;">Failed to load: ' + esc(err.message) + '</td></tr>';
+    });
+}
+
+function coachingRenderKpis(data) {
+  const grid = document.getElementById('coachingKpiGrid');
+  const agents = data.agents || [];
+  const totalAgents = agents.length;
+
+  // Count unique skills with gaps
+  const skillSet = new Set();
+  let totalGapRatio = 0;
+  let gapCount = 0;
+  for (const a of agents) {
+    for (const s of (a.laggingSkills || [])) {
+      skillSet.add(s.skillName);
+      const gap = parseFloat(s.gap);
+      if (!isNaN(gap)) { totalGapRatio += gap; gapCount++; }
+    }
+  }
+  const avgGap = gapCount > 0 ? (totalGapRatio / gapCount).toFixed(1) : '0';
+
+  grid.innerHTML = ''
+    + '<div class="kpi-card"><div class="kpi-value alert">' + totalAgents + '</div><div class="kpi-label">Agents Needing Coaching</div></div>'
+    + '<div class="kpi-card"><div class="kpi-value warn">' + skillSet.size + '</div><div class="kpi-label">Skills with Gaps</div></div>'
+    + '<div class="kpi-card"><div class="kpi-value">' + avgGap + 'x</div><div class="kpi-label">Avg Gap Ratio</div></div>';
+}
+
+function coachingGapPillClass(gapStr) {
+  const gap = parseFloat(gapStr);
+  if (gap >= 3.0) return 'gap-pill-red';
+  if (gap >= 2.0) return 'gap-pill-orange';
+  return 'gap-pill-yellow';
+}
+
+function coachingRenderTable(agents) {
+  const tbody = document.getElementById('coachingTableBody');
+  if (!agents.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No coaching gaps detected — all agents are performing well.</td></tr>';
+    return;
+  }
+  let html = '';
+  for (const a of agents) {
+    const lagging = a.laggingSkills || [];
+    const name = esc((a.name || '') + ' ' + (a.lastName || ''));
+
+    // Build skill pills
+    let pillsHtml = '<div class="skill-gap-row">';
+    let firstRec = '';
+    for (const s of lagging) {
+      const pillClass = coachingGapPillClass(s.gap);
+      pillsHtml += '<span class="gap-pill ' + pillClass + '">' + esc(s.skillName) + ' ' + esc(s.gap) + '</span>';
+      if (!firstRec && s.recommendation) firstRec = s.recommendation;
+    }
+    pillsHtml += '</div>';
+
+    const totalContacts = a.contactCount || 0;
+    const rowClass = lagging.some(s => parseFloat(s.gap) >= 3.0) ? 'row-at-risk' : (lagging.some(s => parseFloat(s.gap) >= 2.0) ? 'row-warning' : '');
+
+    html += '<tr class="' + rowClass + '">';
+    html += '<td class="skill-name">' + name + '</td>';
+    html += '<td>' + pillsHtml + '</td>';
+    html += '<td>' + totalContacts.toLocaleString() + '</td>';
+    html += '<td><span class="rec-text">' + esc(firstRec) + '</span></td>';
+    html += '<td><button class="training-btn" onclick="coachingPlanTraining(\'' + esc(a.name || '') + '\')">Plan Training</button></td>';
+    html += '</tr>';
+  }
+  tbody.innerHTML = html;
+}
+
+function coachingPlanTraining(agentName) {
+  alert('Training plan initiated for ' + agentName + '. This would open the training module assignment workflow.');
+}
+
+/* Load coaching data when Coaching tab is clicked */
+(function patchCoachingTab() {
+  const coachingBtn = document.querySelectorAll('nav button')[3];
+  coachingBtn.addEventListener('click', function() {
+    if (!coachingDataLoaded) coachingLoad();
   });
 })();
 </script>
