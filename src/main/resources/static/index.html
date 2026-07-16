@@ -3,87 +3,119 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Agentic Decision Intelligence</title>
+<title>InsightIQ — Agentic Decision Intelligence</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
   :root {
-    --bg-primary: #0f1720;
-    --bg-card: #16213a;
-    --bg-input: #1a2536;
-    --border: #23324a;
-    --text-primary: #e6edf3;
-    --text-muted: rgba(230,237,243,0.6);
-    --accent-blue: #2f6feb;
-    --accent-green: #7bd88f;
-    --badge-at-risk: #e05252;
-    --badge-warning: #e0a040;
-    --badge-healthy: #7bd88f;
+    --bg-primary: #080d14;
+    --bg-secondary: #0c1220;
+    --bg-card: #111827;
+    --bg-card-hover: #1a2332;
+    --bg-input: #0f1729;
+    --border: #1e293b;
+    --border-light: #334155;
+    --text-primary: #f1f5f9;
+    --text-muted: rgba(148,163,184,0.8);
+    --text-dim: rgba(100,116,139,0.7);
+    --accent-blue: #3b82f6;
+    --accent-blue-glow: rgba(59,130,246,0.15);
+    --accent-green: #10b981;
+    --accent-green-glow: rgba(16,185,129,0.12);
+    --badge-at-risk: #ef4444;
+    --badge-warning: #f59e0b;
+    --badge-healthy: #10b981;
+    --gradient-card: linear-gradient(135deg, rgba(59,130,246,0.05) 0%, rgba(16,185,129,0.03) 100%);
+    --shadow-card: 0 4px 24px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
+    --shadow-glow: 0 0 20px rgba(59,130,246,0.1);
   }
 
   * { box-sizing: border-box; }
-  body { font-family: -apple-system, 'Segoe UI', Roboto, sans-serif; margin: 0; background: var(--bg-primary); color: var(--text-primary); }
+  body { font-family: 'Inter', -apple-system, 'Segoe UI', sans-serif; margin: 0; background: var(--bg-primary); color: var(--text-primary); -webkit-font-smoothing: antialiased; }
 
   /* Header */
-  header { padding: 16px 24px; background: #111c2e; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
-  header h1 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: 0.3px; }
-  header .sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+  header {
+    padding: 14px 28px;
+    background: linear-gradient(180deg, #0c1220 0%, #080d14 100%);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 16px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    backdrop-filter: blur(12px);
+  }
+  header h1 { margin: 0; font-size: 17px; font-weight: 700; letter-spacing: -0.3px; background: linear-gradient(135deg, #3b82f6, #10b981); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  header .sub { font-size: 11px; color: var(--text-dim); margin-top: 2px; letter-spacing: 0.3px; text-transform: uppercase; }
 
   /* Tab bar */
-  nav { display: flex; gap: 4px; }
+  nav { display: flex; gap: 3px; overflow-x: auto; scrollbar-width: none; padding: 4px; background: rgba(15,23,42,0.6); border-radius: 10px; border: 1px solid var(--border); }
+  nav::-webkit-scrollbar { display: none; }
   nav button {
-    padding: 8px 18px;
+    padding: 7px 14px;
     background: transparent;
-    border: 1px solid transparent;
-    border-radius: 8px;
+    border: none;
+    border-radius: 7px;
     color: var(--text-muted);
-    font-size: 14px;
+    font-size: 12.5px;
     font-weight: 500;
     cursor: pointer;
-    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+    letter-spacing: -0.1px;
   }
-  nav button:hover { background: rgba(47,111,235,0.12); color: var(--text-primary); }
-  nav button.active { background: rgba(47,111,235,0.2); border-color: var(--accent-blue); color: var(--text-primary); }
+  nav button:hover { background: rgba(59,130,246,0.1); color: var(--text-primary); }
+  nav button.active { background: var(--accent-blue); color: white; box-shadow: 0 2px 8px rgba(59,130,246,0.3); font-weight: 600; }
 
   /* Main / panels */
-  main { max-width: 1000px; margin: 0 auto; padding: 28px 24px; }
-  .panel { display: none; }
+  main { max-width: 1280px; margin: 0 auto; padding: 28px 32px; }
+  .panel { display: none; animation: fadeIn 0.3s ease; }
   .panel.active { display: block; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 
   /* ===================== CHAT PANEL ===================== */
-  .prompt-row { display: flex; gap: 8px; margin-bottom: 12px; }
-  input[type=text] { flex: 1; padding: 12px 14px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); font-size: 14px; outline: none; transition: border-color 0.15s; }
-  input[type=text]:focus { border-color: var(--accent-blue); }
+  .prompt-row { display: flex; gap: 10px; margin-bottom: 12px; }
+  input[type=text] { flex: 1; padding: 13px 16px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 10px; color: var(--text-primary); font-size: 14px; font-family: inherit; outline: none; transition: all 0.2s; }
+  input[type=text]:focus { border-color: var(--accent-blue); box-shadow: 0 0 0 3px rgba(59,130,246,0.15); }
   .ask-btn {
-    padding: 12px 20px;
-    background: var(--accent-blue);
+    padding: 13px 22px;
+    background: linear-gradient(135deg, #3b82f6, #2563eb);
     border: 0;
-    border-radius: 8px;
+    border-radius: 10px;
     color: white;
     font-weight: 600;
+    font-family: inherit;
     cursor: pointer;
     display: flex;
     align-items: center;
     gap: 8px;
     white-space: nowrap;
-    transition: opacity 0.15s;
+    transition: all 0.2s;
+    box-shadow: 0 2px 8px rgba(59,130,246,0.3);
   }
-  .ask-btn:disabled { opacity: 0.6; cursor: wait; }
+  .ask-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(59,130,246,0.4); }
+  .ask-btn:disabled { opacity: 0.6; cursor: wait; transform: none; }
 
-  .examples { font-size: 12px; color: var(--text-muted); margin-bottom: 18px; line-height: 1.8; }
-  .examples a { color: #7bb0ff; cursor: pointer; margin-right: 10px; text-decoration: none; }
-  .examples a:hover { text-decoration: underline; }
+  .examples { font-size: 12px; color: var(--text-dim); margin-bottom: 18px; line-height: 2; }
+  .examples a { color: var(--accent-blue); cursor: pointer; margin-right: 8px; text-decoration: none; padding: 4px 10px; background: rgba(59,130,246,0.08); border-radius: 6px; border: 1px solid rgba(59,130,246,0.2); transition: all 0.2s; }
+  .examples a:hover { background: rgba(59,130,246,0.15); border-color: var(--accent-blue); }
 
   /* Investigation log */
   .investigation-log {
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 12px 16px;
+    border-radius: 10px;
+    padding: 14px 18px;
     margin-bottom: 14px;
-    font-size: 13px;
-    font-family: 'SFMono-Regular', Consolas, monospace;
+    font-size: 12px;
+    font-family: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
     max-height: 180px;
     overflow-y: auto;
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);
   }
   .log-entry { padding: 2px 0; color: var(--text-muted); }
   .log-entry.highlight { color: var(--text-primary); }
@@ -164,7 +196,7 @@
   }
 
   /* Result card */
-  .result-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; margin-bottom: 12px; }
+  .result-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 20px 22px; margin-bottom: 14px; box-shadow: var(--shadow-card); }
   .summary { font-size: 15px; line-height: 1.6; margin-bottom: 14px; }
   .cause-card { border-left: 3px solid var(--accent-blue); padding: 10px 14px; margin-bottom: 10px; background: #1a2942; border-radius: 4px; }
   .cause-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
@@ -190,32 +222,35 @@
   @keyframes spin { to { transform: rotate(360deg); } }
 
   /* ===================== RISK PANEL ===================== */
-  .risk-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
-  .risk-header h2 { margin: 0; font-size: 18px; font-weight: 600; }
-  .last-updated { font-size: 12px; color: var(--text-muted); }
+  .risk-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 22px; }
+  .risk-header h2 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.3px; }
+  .last-updated { font-size: 11px; color: var(--text-dim); }
   .refresh-btn {
-    padding: 7px 14px;
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    color: var(--text-muted);
-    font-size: 13px;
+    padding: 8px 16px;
+    background: rgba(59,130,246,0.08);
+    border: 1px solid rgba(59,130,246,0.25);
+    border-radius: 8px;
+    color: var(--accent-blue);
+    font-size: 12px;
+    font-weight: 500;
+    font-family: inherit;
     cursor: pointer;
-    transition: border-color 0.15s, color 0.15s;
+    transition: all 0.2s;
   }
-  .refresh-btn:hover { border-color: var(--accent-blue); color: var(--text-primary); }
+  .refresh-btn:hover { background: rgba(59,130,246,0.15); border-color: var(--accent-blue); transform: translateY(-1px); }
 
-  .risk-table { width: 100%; border-collapse: collapse; background: var(--bg-card); border-radius: 10px; overflow: hidden; }
-  .risk-table th { background: #111c2e; padding: 12px 16px; text-align: left; font-size: 13px; color: var(--text-muted); border-bottom: 1px solid var(--border); font-weight: 500; }
-  .risk-table td { padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 14px; }
+  .risk-table { width: 100%; border-collapse: separate; border-spacing: 0; background: var(--bg-card); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow-card); }
+  .risk-table th { background: rgba(15,23,42,0.8); padding: 13px 16px; text-align: left; font-size: 11px; color: var(--text-dim); border-bottom: 1px solid var(--border); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+  .risk-table td { padding: 13px 16px; border-bottom: 1px solid rgba(30,41,59,0.5); font-size: 13px; transition: background 0.15s; }
+  .risk-table tbody tr:hover td { background: rgba(59,130,246,0.04); }
   .risk-table tbody tr:last-child td { border-bottom: none; }
-  .row-at-risk td { background: rgba(224,82,82,0.05); }
-  .row-warning td { background: rgba(224,160,64,0.05); }
+  .row-at-risk td { background: rgba(239,68,68,0.04); }
+  .row-warning td { background: rgba(245,158,11,0.04); }
 
-  .risk-badge { padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; }
-  .badge-at-risk { background: rgba(224,82,82,0.2); color: var(--badge-at-risk); }
-  .badge-warning { background: rgba(224,160,64,0.2); color: var(--badge-warning); }
-  .badge-healthy { background: rgba(123,216,143,0.2); color: var(--badge-healthy); }
+  .risk-badge { padding: 4px 10px; border-radius: 6px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+  .badge-at-risk { background: rgba(239,68,68,0.15); color: var(--badge-at-risk); }
+  .badge-warning { background: rgba(245,158,11,0.15); color: var(--badge-warning); }
+  .badge-healthy { background: rgba(16,185,129,0.15); color: var(--badge-healthy); }
 
   .skill-name { font-weight: 500; }
   .rec-text { font-size: 13px; }
@@ -279,17 +314,18 @@
     position: fixed;
     bottom: 24px;
     right: 24px;
-    width: 340px;
+    width: 360px;
     background: var(--bg-card);
-    border: 1px solid var(--accent-blue);
-    border-radius: 12px;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.45);
+    border: 1px solid rgba(59,130,246,0.3);
+    border-radius: 14px;
+    box-shadow: 0 12px 48px rgba(0,0,0,0.5), 0 0 20px rgba(59,130,246,0.1);
     z-index: 1000;
     display: none;
-    animation: slideIn 0.3s ease-out;
+    animation: slideInUp 0.4s cubic-bezier(0.16,1,0.3,1);
+    backdrop-filter: blur(12px);
   }
   .nudge-overlay.visible { display: block; }
-  @keyframes slideIn { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  @keyframes slideInUp { from { transform: translateY(24px) scale(0.96); opacity: 0; } to { transform: translateY(0) scale(1); opacity: 1; } }
 
   .nudge-header { display: flex; align-items: center; gap: 8px; padding: 12px 16px 10px; border-bottom: 1px solid var(--border); }
   .nudge-icon { font-size: 18px; }
@@ -305,64 +341,82 @@
   /* KPI Widgets */
   .kpi-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-    gap: 12px;
-    margin-bottom: 16px;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 14px;
+    margin-bottom: 20px;
   }
   .kpi-card {
-    background: #1a2942;
+    background: var(--gradient-card);
     border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 14px 16px;
+    border-radius: 12px;
+    padding: 18px 16px;
     text-align: center;
+    transition: all 0.25s ease;
+    position: relative;
+    overflow: hidden;
   }
+  .kpi-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--accent-blue), var(--accent-green));
+    opacity: 0;
+    transition: opacity 0.25s;
+  }
+  .kpi-card:hover { border-color: var(--border-light); transform: translateY(-2px); box-shadow: var(--shadow-glow); }
+  .kpi-card:hover::before { opacity: 1; }
   .kpi-value {
-    font-size: 22px;
-    font-weight: 700;
+    font-size: 24px;
+    font-weight: 800;
     color: var(--accent-blue);
-    margin-bottom: 4px;
+    margin-bottom: 6px;
+    letter-spacing: -0.5px;
   }
   .kpi-value.alert { color: var(--badge-at-risk); }
   .kpi-value.warn { color: var(--badge-warning); }
   .kpi-value.good { color: var(--accent-green); }
   .kpi-label {
-    font-size: 11px;
-    color: var(--text-muted);
+    font-size: 10px;
+    color: var(--text-dim);
     text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.7px;
+    font-weight: 500;
   }
 
   /* Suggested Actions */
   .suggested-actions {
-    margin-top: 14px;
-    padding-top: 14px;
+    margin-top: 16px;
+    padding-top: 16px;
     border-top: 1px solid var(--border);
   }
   .suggested-actions-title {
-    font-size: 12px;
+    font-size: 10px;
     font-weight: 600;
-    color: var(--text-muted);
+    color: var(--text-dim);
     text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.8px;
     margin-bottom: 10px;
   }
   .action-btn {
     display: inline-block;
     margin: 4px 6px 4px 0;
-    padding: 8px 16px;
-    background: rgba(47,111,235,0.12);
-    border: 1px solid rgba(47,111,235,0.4);
-    border-radius: 20px;
-    color: #7bb0ff;
-    font-size: 13px;
+    padding: 8px 14px;
+    background: rgba(59,130,246,0.08);
+    border: 1px solid rgba(59,130,246,0.25);
+    border-radius: 8px;
+    color: var(--accent-blue);
+    font-size: 12px;
     font-weight: 500;
+    font-family: inherit;
     cursor: pointer;
-    transition: background 0.15s, border-color 0.15s, transform 0.1s;
+    transition: all 0.2s ease;
   }
   .action-btn:hover {
-    background: rgba(47,111,235,0.25);
+    background: rgba(59,130,246,0.15);
     border-color: var(--accent-blue);
     transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(59,130,246,0.2);
   }
   .action-btn:active {
     transform: translateY(0);
@@ -372,33 +426,36 @@
   .chart-container {
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 16px;
-    margin-bottom: 16px;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 18px;
     position: relative;
-    height: 250px;
+    height: 260px;
+    box-shadow: var(--shadow-card);
   }
 
   /* Chat messages */
-  .chat-msg { margin-bottom: 16px; display: flex; flex-direction: column; }
+  .chat-msg { margin-bottom: 18px; display: flex; flex-direction: column; }
   .chat-msg.user { align-items: flex-end; }
   .chat-msg.bot { align-items: flex-start; }
   .chat-bubble-user {
-    background: var(--accent-blue);
+    background: linear-gradient(135deg, #3b82f6, #2563eb);
     color: white;
-    padding: 10px 16px;
-    border-radius: 16px 16px 4px 16px;
+    padding: 11px 18px;
+    border-radius: 18px 18px 4px 18px;
     font-size: 14px;
-    max-width: 75%;
+    max-width: 70%;
     word-wrap: break-word;
+    box-shadow: 0 2px 8px rgba(59,130,246,0.25);
   }
   .chat-bubble-bot {
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: 4px 16px 16px 16px;
-    padding: 16px 18px;
+    border-radius: 4px 18px 18px 18px;
+    padding: 18px 20px;
     max-width: 95%;
     width: 100%;
+    box-shadow: var(--shadow-card);
   }
   .chat-loading-indicator {
     display: flex; align-items: center; gap: 8px;
@@ -413,12 +470,13 @@
   .overflow-card {
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 18px 20px;
+    border-radius: 12px;
+    padding: 20px 22px;
     margin-bottom: 14px;
-    transition: border-color 0.2s;
+    transition: all 0.25s ease;
+    box-shadow: var(--shadow-card);
   }
-  .overflow-card:hover { border-color: var(--accent-blue); }
+  .overflow-card:hover { border-color: var(--border-light); transform: translateY(-2px); box-shadow: 0 8px 32px rgba(0,0,0,0.3); }
   .overflow-card.severity-critical { border-left: 4px solid var(--badge-at-risk); }
   .overflow-card.severity-high { border-left: 4px solid var(--badge-warning); }
   .overflow-card.severity-medium { border-left: 4px solid var(--accent-blue); }
@@ -446,27 +504,29 @@
 
 <header>
   <div>
-    <h1>Agentic Decision Intelligence</h1>
-    <div class="sub">Claude on Bedrock · agent loop · Snowflake prod-NA1</div>
+    <h1>InsightIQ — Agentic Decision Intelligence</h1>
+    <div class="sub">Claude on Bedrock · Multi-Agent · Snowflake Production</div>
   </div>
   <div style="display:flex; align-items:center; gap:12px;">
-    <select id="tenantSelect" style="padding:8px 12px; background:var(--bg-input); border:1px solid var(--border); border-radius:6px; color:var(--text-primary); font-size:13px; min-width:220px; cursor:pointer;" onchange="switchTenant(this.value)">
+    <select id="tenantSelect" style="padding:9px 14px; background:var(--bg-input); border:1px solid var(--border); border-radius:8px; color:var(--text-primary); font-size:12px; font-family:inherit; min-width:220px; cursor:pointer; transition: border-color 0.2s;" onchange="switchTenant(this.value)" onfocus="this.style.borderColor='var(--accent-blue)'" onblur="this.style.borderColor='var(--border)'">
       <option value="">Loading tenants...</option>
     </select>
+    <div style="width:8px;height:8px;border-radius:50%;background:var(--accent-green);box-shadow:0 0 6px var(--accent-green);"></div>
+    <span style="font-size:11px;color:var(--text-dim);">Live</span>
   </div>
   <nav>
     <button class="active" onclick="switchTab('chat', this)">RCA Chat</button>
-    <button onclick="switchTab('risk', this)">Risk Monitor</button>
+    <button onclick="switchTab('roi', this)">ROI</button>
+    <button onclick="switchTab('briefing', this)">Briefing</button>
     <button onclick="switchTab('forecast', this)">Forecast</button>
+    <button onclick="switchTab('risk', this)">Risk</button>
     <button onclick="switchTab('coaching', this)">Coaching</button>
     <button onclick="switchTab('burnout', this)">Burnout</button>
     <button onclick="switchTab('anomaly', this)">Anomaly</button>
     <button onclick="switchTab('simulator', this)">Simulator</button>
     <button onclick="switchTab('shrinkage', this)">Shrinkage</button>
     <button onclick="switchTab('deflection', this)">Deflection</button>
-    <button onclick="switchTab('roi', this)">ROI</button>
-    <button onclick="switchTab('briefing', this)">Briefing</button>
-    <button onclick="switchTab('agent', this)">Agent View</button>
+    <button onclick="switchTab('agent', this)">Agents</button>
   </nav>
 </header>
 
@@ -768,9 +828,10 @@
       <h2>ROI & Cost Savings Dashboard</h2>
       <button class="refresh-btn" onclick="roiLoad()">Refresh</button>
     </div>
-    <div id="roiSummary" style="text-align:center;margin-bottom:24px;">
-      <div style="font-size:36px;font-weight:700;color:var(--accent-green);" id="roiTotal">--</div>
-      <div style="font-size:13px;color:var(--text-muted);">Estimated Annual Savings</div>
+    <div id="roiSummary" style="text-align:center;margin-bottom:32px;padding:32px 20px;background:var(--gradient-card);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow-glow);">
+      <div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text-dim);margin-bottom:8px;font-weight:600;">Estimated Annual Savings</div>
+      <div style="font-size:44px;font-weight:800;letter-spacing:-1px;background:linear-gradient(135deg,#10b981,#34d399);-webkit-background-clip:text;-webkit-text-fill-color:transparent;" id="roiTotal">--</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-top:6px;">Calculated from live Snowflake production data</div>
     </div>
     <div id="roiBreakdown" style="display:grid;gap:14px;">
       <div style="color:var(--text-muted);font-size:13px;">Loading ROI data...</div>
@@ -1510,7 +1571,7 @@ function riskStartPolling() {
 
 /* Start polling when Risk tab is first opened */
 (function patchRiskTab() {
-  const riskBtn = document.querySelectorAll('nav button')[1];
+  const riskBtn = document.querySelectorAll('nav button')[4];
   const orig = riskBtn.getAttribute('onclick');
   riskBtn.setAttribute('onclick', '');
   riskBtn.addEventListener('click', function() {
@@ -1737,7 +1798,7 @@ function agentRenderTable(agents) {
 
 /* Load agent data when Agent View tab is clicked */
 (function patchAgentTab() {
-  const agentBtn = document.querySelectorAll('nav button')[11];
+  const agentBtn = document.querySelectorAll('nav button')[11]; /* Agents tab */
   agentBtn.addEventListener('click', function() {
     if (!agentDataLoaded) agentLoad();
   });
@@ -1840,7 +1901,7 @@ function coachingPlanTraining(agentName) {
 
 /* Load coaching data when Coaching tab is clicked */
 (function patchCoachingTab() {
-  const coachingBtn = document.querySelectorAll('nav button')[3];
+  const coachingBtn = document.querySelectorAll('nav button')[5];
   coachingBtn.addEventListener('click', function() {
     if (!coachingDataLoaded) coachingLoad();
   });
@@ -1948,7 +2009,7 @@ function forecastRenderTable(forecast) {
 
 /* Load forecast data when Forecast tab is clicked */
 (function patchForecastTab() {
-  const forecastBtn = document.querySelectorAll('nav button')[2];
+  const forecastBtn = document.querySelectorAll('nav button')[3];
   forecastBtn.addEventListener('click', function() {
     if (!forecastDataLoaded) forecastLoad();
   });
@@ -1988,7 +2049,7 @@ function burnoutLoad() {
     burnoutLoaded = true;
   }).catch(e => { tbody.innerHTML = '<tr><td colspan="5" style="color:#e05252;">Error: ' + esc(e.message) + '</td></tr>'; });
 }
-(function() { document.querySelectorAll('nav button')[4].addEventListener('click', function() { if (!burnoutLoaded) burnoutLoad(); }); })();
+(function() { document.querySelectorAll('nav button')[6].addEventListener('click', function() { if (!burnoutLoaded) burnoutLoad(); }); })();
 
 /* ============================================================
    ANOMALY DETECTION
@@ -2026,7 +2087,7 @@ function anomalyLoad() {
     anomalyLoaded = true;
   }).catch(e => { body.innerHTML = '<div style="color:#e05252;padding:12px;">Error: ' + esc(e.message) + '</div>'; });
 }
-(function() { document.querySelectorAll('nav button')[5].addEventListener('click', function() { if (!anomalyLoaded) anomalyLoad(); }); })();
+(function() { document.querySelectorAll('nav button')[7].addEventListener('click', function() { if (!anomalyLoaded) anomalyLoad(); }); })();
 
 /* ============================================================
    STAFFING SIMULATOR
@@ -2077,7 +2138,7 @@ function simRun() {
       resDiv.innerHTML = html;
     }).catch(e => { resDiv.innerHTML = '<div style="color:#e05252;">Error: ' + esc(e.message) + '</div>'; });
 }
-(function() { document.querySelectorAll('nav button')[6].addEventListener('click', function() { if (!simSkills.length) simLoad(); }); })();
+(function() { document.querySelectorAll('nav button')[8].addEventListener('click', function() { if (!simSkills.length) simLoad(); }); })();
 
 /* ============================================================
    SHRINKAGE ANALYSIS
@@ -2118,7 +2179,7 @@ function shrinkageLoad() {
     shrinkageLoaded = true;
   }).catch(e => { tbody.innerHTML = '<tr><td colspan="9" style="color:#e05252;">Error: ' + esc(e.message) + '</td></tr>'; });
 }
-(function() { document.querySelectorAll('nav button')[7].addEventListener('click', function() { if (!shrinkageLoaded) shrinkageLoad(); }); })();
+(function() { document.querySelectorAll('nav button')[9].addEventListener('click', function() { if (!shrinkageLoaded) shrinkageLoad(); }); })();
 
 /* ============================================================
    DEFLECTION OPPORTUNITIES
@@ -2156,7 +2217,7 @@ function deflectionLoad() {
     deflectionLoaded = true;
   }).catch(e => { body.innerHTML = '<div style="color:#e05252;">Error: ' + esc(e.message) + '</div>'; });
 }
-(function() { document.querySelectorAll('nav button')[8].addEventListener('click', function() { if (!deflectionLoaded) deflectionLoad(); }); })();
+(function() { document.querySelectorAll('nav button')[10].addEventListener('click', function() { if (!deflectionLoaded) deflectionLoad(); }); })();
 
 /* ============================================================
    ROI DASHBOARD
@@ -2189,8 +2250,6 @@ function roiLoad() {
     roiLoaded = true;
   }).catch(e => { document.getElementById('roiBreakdown').innerHTML = '<div style="color:#e05252;">Error: ' + esc(e.message) + '</div>'; });
 }
-(function() { document.querySelectorAll('nav button')[9].addEventListener('click', function() { if (!roiLoaded) roiLoad(); }); })();
-
 /* ============================================================
    AI DAILY BRIEFING
    ============================================================ */
@@ -2232,7 +2291,12 @@ function briefingLoad() {
     briefingLoaded = true;
   }).catch(e => { div.innerHTML = '<div style="color:#e05252;padding:20px;">Error: ' + esc(e.message) + '</div>'; });
 }
-(function() { document.querySelectorAll('nav button')[10].addEventListener('click', function() { if (!briefingLoaded) briefingLoad(); }); })();
+(function() { document.querySelectorAll('nav button')[2].addEventListener('click', function() { if (!briefingLoaded) briefingLoad(); }); })();
+
+/* Auto-load ROI when its tab is clicked */
+(function() {
+  document.querySelectorAll('nav button')[1].addEventListener('click', function() { if (!roiLoaded) roiLoad(); });
+})();
 </script>
 </body>
 </html>
