@@ -505,7 +505,7 @@
 <header>
   <div>
     <h1>InsightIQ — Agentic Decision Intelligence</h1>
-    <div class="sub">Claude on Bedrock · Multi-Agent · Snowflake Production</div>
+    <div class="sub">Agentic Decision Intelligence Platform</div>
   </div>
   <div style="display:flex; align-items:center; gap:12px;">
     <select id="tenantSelect" style="padding:9px 14px; background:var(--bg-input); border:1px solid var(--border); border-radius:8px; color:var(--text-primary); font-size:12px; font-family:inherit; min-width:220px; cursor:pointer; transition: border-color 0.2s;" onchange="switchTenant(this.value)" onfocus="this.style.borderColor='var(--accent-blue)'" onblur="this.style.borderColor='var(--border)'">
@@ -536,8 +536,8 @@
   <section id="panel-chat" class="panel active">
     <div class="examples">
       Try:
-      <a onclick="chatFill('Why is PerfUser_0011 unavailable for long time?')">Why is PerfUser_0011 unavailable?</a>
-      <a onclick="chatFill('Show agent sessions with names')">Show agent sessions</a>
+      <a onclick="chatFill('Which skills have the highest refusal rate?')">Top refusal rates</a>
+      <a onclick="chatFill('Show top 10 agents by handle time')">Top agents by AHT</a>
       <a onclick="chatFill('Which agents are taking more breaks?')">Agents taking breaks</a>
     </div>
 
